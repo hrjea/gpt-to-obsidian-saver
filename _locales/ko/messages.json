@@ -1,0 +1,8 @@
+{
+  "extensionName": {
+    "message": "GPT → Obsidian Saver"
+  },
+  "extensionDescription": {
+    "message": "ChatGPT의 Obsidian 저장 버튼으로 질문/답변을 옵시디언 노트로 저장합니다."
+  }
+}

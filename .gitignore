@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+*.zip
+*.log
+.env
+.env.*
+smoke-test-artifacts/
+screenshots-private/
+native-wrapper.log
+native-host.log

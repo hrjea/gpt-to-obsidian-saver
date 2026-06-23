@@ -1,0 +1,8 @@
+{
+  "extensionName": {
+    "message": "GPT → Obsidian Saver"
+  },
+  "extensionDescription": {
+    "message": "Save ChatGPT questions and answers to Obsidian with a Save to Obsidian button."
+  }
+}

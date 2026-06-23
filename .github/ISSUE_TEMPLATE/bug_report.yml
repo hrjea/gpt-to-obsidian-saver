@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a reproducible problem with GPT to Obsidian Saver.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+      placeholder: "1.5.20"
+    validations:
+      required: true
+  - type: input
+    id: package-version
+    attributes:
+      label: GitHub Release package version
+      placeholder: "v1.5.20"
+    validations:
+      required: true
+  - type: input
+    id: chrome-version
+    attributes:
+      label: Chrome version
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version, if relevant
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Save mode
+      options:
+        - Obsidian URI mode
+        - Native-helper mode
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use sanitized, minimal steps. Do not paste private ChatGPT conversations.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove private paths, extension IDs, vault names, tokens, credentials, and private ChatGPT content.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed private ChatGPT content, vault data, credentials, tokens, private paths, and private extension IDs.
+          required: true

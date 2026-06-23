@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest a change or enhancement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Permission impact
+      description: Would this require new Chrome permissions or broader host access?
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy impact
+      description: Would this process more data, store more data, or change native-helper behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: platform
+    attributes:
+      label: Platform impact
+      description: macOS, Windows Experimental, Linux unsupported native-helper mode, or Chrome version implications.
+    validations:
+      required: true

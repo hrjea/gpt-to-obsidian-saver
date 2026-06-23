@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GPT → Obsidian Saver Settings</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    label { display:block; margin: 12px 0 6px; font-weight: 600; }
+    input[type="text"], select { width: 100%; padding: 8px; border:1px solid #ccc; border-radius:8px; box-sizing: border-box; }
+    .row { margin: 16px 0; }
+    .hint { color:#666; font-size: 12px; }
+    .diagnostic { margin: 8px 0 18px; padding: 8px; border: 1px solid #bbb; border-radius: 6px; background: #f7f7f7; color: #333; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    button { padding:10px 14px; border-radius:8px; border:1px solid #333; background:#111; color:white; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>GPT → Obsidian Saver</h1>
+  <div id="buildDiagnostic" class="diagnostic">Build version 1.5.20 | saveHtmlCodeBlocksAsAttachments: loading | usePreviousQaForHtml: loading | content script VERSION: 1.5.20</div>
+  <div class="row">
+    <label for="uiLanguage" data-i18n="uiLanguageLabel">Language</label>
+    <select id="uiLanguage">
+      <option value="en">English</option>
+      <option value="ko">한국어</option>
+    </select>
+    <div class="hint" data-i18n="uiLanguageHint">English is the default. Choose Korean to use the previous Korean UI.</div>
+  </div>
+  <div class="row">
+    <label for="vaultName" data-i18n="vaultNameLabel">Obsidian Vault name</label>
+    <input id="vaultName" type="text" placeholder="Example: MyVault" data-i18n-placeholder="vaultNamePlaceholder">
+    <div class="hint" data-i18n="vaultNameHint">Enter the exact vault name used by Obsidian. The Obsidian URI core plugin must be enabled.</div>
+  </div>
+  <div class="row">
+    <label for="vaultPath" data-i18n="vaultPathLabel">Local Obsidian vault path</label>
+    <input id="vaultPath" type="text" placeholder="macOS: /Users/you/Documents/Obsidian/MyVault / Windows: C:\Users\you\Documents\Obsidian\MyVault" data-i18n-placeholder="vaultPathPlaceholder">
+    <div class="hint" data-i18n="vaultPathHint">Required only for Native helper mode. Used to write notes and HTML attachments directly into the local vault.</div>
+  </div>
+  <div class="row">
+    <label for="folderPath" data-i18n="folderPathLabel">Save folder path (optional)</label>
+    <input id="folderPath" type="text" placeholder="Example: ChatGPT" data-i18n-placeholder="folderPathPlaceholder">
+    <div class="hint" data-i18n="folderPathHint">Example: Notes/ChatGPT. Leave empty to save at the vault root.</div>
+  </div>
+  <div class="row">
+    <label for="htmlSaveDir" data-i18n="htmlSaveDirLabel">HTML file save folder</label>
+    <input id="htmlSaveDir" type="text" placeholder="Leave empty for Attachments" data-i18n-placeholder="htmlSaveDirPlaceholder">
+    <div class="hint" data-i18n="htmlSaveDirHint">Relative paths are resolved inside the vault. Absolute paths are allowed only inside vaultPath. Default is Attachments inside the vault.</div>
+  </div>
+  <div class="row">
+    <label><input id="prefixDate" type="checkbox" checked> <span data-i18n="prefixDateLabel">Add date prefix (YYYY-MM-DD) to file names</span></label>
+  </div>
+  <div class="row">
+    <label><input id="includeTime" type="checkbox"> <span data-i18n="includeTimeLabel">Also add time (HH-mm-ss) after the date</span></label>
+    <div class="hint" data-i18n="includeTimeHint">This helps avoid duplicate file names when saving the same title multiple times.</div>
+  </div>
+  <div class="row">
+    <label><input id="keepQM" type="checkbox"> <span data-i18n="keepQMLabel">Allow question marks (?) in file names</span></label>
+    <div class="hint" data-i18n="keepQMHint">Not allowed on Windows. Enable only on macOS/Linux.</div>
+  </div>
+  <div class="row">
+    <label><input id="bodyTitle" type="checkbox"> <span data-i18n="bodyTitleLabel">Add title H1 to note body (Windows compatible)</span></label>
+    <div class="hint" data-i18n="bodyTitleHint">Adds a visible title at the top of the note body for environments where ? cannot be used in file names.</div>
+  </div>
+  <div class="row">
+    <label><input id="saveHtmlCodeBlocks" type="checkbox"> <span data-i18n="saveHtmlCodeBlocksLabel">Save HTML code blocks as .html attachments</span></label>
+    <div class="hint" data-i18n="saveHtmlCodeBlocksHint">Default off. When enabled, fenced HTML code blocks are also saved as HTML attachment files.</div>
+  </div>
+  <div class="row">
+    <label><input id="usePreviousQaForHtml" type="checkbox"> <span data-i18n="usePreviousQaForHtmlLabel">Use the previous Q&A when saving an HTML learning note</span></label>
+    <div class="hint" data-i18n="usePreviousQaForHtmlHint">Default off. When enabled, HTML attachment notes use the Q&A immediately before the HTML-generation request.</div>
+  </div>
+  <div class="row">
+    <button id="saveBtn" data-i18n="saveButton">Save</button>
+    <span id="status" class="hint" style="margin-left:12px;"></span>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
