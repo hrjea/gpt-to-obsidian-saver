@@ -68,6 +68,7 @@ if [ $? -eq 0 ]; then pass "manifest permissions"; else fail "manifest permissio
 for file in content.js background.js options.js; do
   check_cmd "syntax $file" node --check "$file"
 done
+check_cmd "content behavior self-test" node tests/previous-qa-html-learning-self-test.js
 
 check_cmd "manifest JSON" python3 -m json.tool manifest.json
 check_cmd "English locale JSON" python3 -m json.tool _locales/en/messages.json
@@ -98,6 +99,7 @@ required_files=(
   docs/troubleshooting.md docs/manual-smoke-test.md docs/release.md docs/github-installation.md
   docs/codex-for-oss-application-notes.md assets/screenshots/README.md
   scripts/validate-release.sh scripts/package-release.sh
+  tests/previous-qa-html-learning-self-test.js
   .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml
   .github/ISSUE_TEMPLATE/config.yml .github/PULL_REQUEST_TEMPLATE.md
   native-host/native-open-obsidian.py native-host/native-open-obsidian.sh native-host/native-open-obsidian.cmd

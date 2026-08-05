@@ -19,7 +19,7 @@ Unpacked extension IDs can change when the extension is loaded from a different 
 
 ## macOS Installation
 
-Download and unzip `gpt-to-obsidian-saver-v1.5.20-native-host-macos.zip`, then run:
+Download and unzip `gpt-to-obsidian-saver-v1.5.25-native-host-macos.zip`, then run:
 
 ```sh
 ./installers/macos-install.sh --extension-id <extension-id>

@@ -1,4 +1,4 @@
-# Manual Smoke Test for v1.5.20
+# Manual Smoke Test for v1.5.25
 
 Use only a test vault and a new temporary ChatGPT conversation. Do not use private conversations or a main Obsidian vault.
 
@@ -11,12 +11,12 @@ node tests/previous-qa-html-learning-self-test.js
 
 ## GitHub ZIP Fresh Installation
 
-1. Extract `gpt-to-obsidian-saver-v1.5.20-unpacked-extension.zip` to a fresh temporary folder.
+1. Extract `gpt-to-obsidian-saver-v1.5.25-unpacked-extension.zip` to a fresh temporary folder.
 2. Open `chrome://extensions`.
 3. Enable Developer mode.
 4. Select Load unpacked.
 5. Select the extracted folder containing `manifest.json`.
-6. Confirm version `1.5.20`.
+6. Confirm version `1.5.25`.
 7. Confirm there are no manifest errors.
 
 ## Options

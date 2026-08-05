@@ -2,7 +2,7 @@
 
 ## Supported Releases
 
-The initial public release is `1.5.20`. Security fixes are expected to target the latest public release unless a later policy states otherwise.
+The initial public release candidate is `1.5.25-rc.1`. Security fixes are expected to target the latest public release unless a later policy states otherwise.
 
 ## Architecture Summary
 

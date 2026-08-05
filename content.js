@@ -1,7 +1,7 @@
 
-// content.js (1.5.20) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.25) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.20";
+  const VERSION = "1.5.25";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
@@ -26,6 +26,7 @@
       nativeSaveFailedSuffix: "\nThe Markdown note was opened through URI mode, but HTML attachments may not have been saved.",
       htmlDownloadNotAttachedWarning: "HTML file was downloaded by Chrome, but the extension could not attach it to the Obsidian note.",
       htmlDownloadCopyFailedWarning: "HTML file was downloaded by Chrome, but could not be copied into the Obsidian vault.",
+      htmlArtifactCaptureFailedWarning: "The HTML artifact could not be read or downloaded, so it was not attached to the Obsidian note.",
       htmlAttachmentSavedLine: "HTML file saved as attachment.",
       runtimeUnavailable: "extension runtime unavailable"
     },
@@ -43,6 +44,7 @@
       nativeSaveFailedSuffix: "\nMarkdown 노트는 URI mode로 다시 열었지만, HTML 첨부파일은 저장되지 않았을 수 있습니다.",
       htmlDownloadNotAttachedWarning: "HTML 파일이 Chrome으로 다운로드되었지만, 확장 프로그램이 Obsidian 노트에 첨부하지 못했습니다.",
       htmlDownloadCopyFailedWarning: "HTML 파일이 Chrome으로 다운로드되었지만, Obsidian vault로 복사하지 못했습니다.",
+      htmlArtifactCaptureFailedWarning: "HTML artifact 내용을 읽거나 다운로드하지 못해 Obsidian 노트에 첨부하지 못했습니다.",
       htmlAttachmentSavedLine: "HTML 파일은 첨부파일로 저장되었습니다.",
       runtimeUnavailable: "extension runtime을 사용할 수 없습니다"
     }
@@ -206,11 +208,11 @@
       "",
       (settings && settings.bodyTitle ? `# ${title}` : ''),
       "",
-      `## ${t("questionHeading")}`,
+      `# ${t("questionHeading")}`,
       "",
       questionText || "",
       "",
-      `## ${t("answerHeading")}`,
+      `# ${t("answerHeading")}`,
       "",
       answerText || "",
       attachmentMarker
@@ -234,15 +236,15 @@
       lines.push(`# ${title}`, "");
     }
     lines.push(
-      `## ${t("htmlLearningHeading")}`,
+      `# ${t("htmlLearningHeading")}`,
       "",
       attachmentMarker || "",
       "",
-      `## ${questionHeading}`,
+      `# ${questionHeading}`,
       "",
       questionText || "",
       "",
-      `## ${answerHeading}`,
+      `# ${answerHeading}`,
       "",
       answerText || ""
     );
@@ -785,6 +787,8 @@
     if (!node) return "";
     const clone = node.cloneNode(true);
     removePreviousQaMarkdownChrome(clone);
+    const markdown = htmlToMarkdown(clone.innerHTML || "");
+    if (markdown && markdown.length >= 3) return markdown.trim();
     return (clone.innerText || clone.textContent || "").trim();
   }
 
@@ -832,14 +836,25 @@
     return clipboardText || "";
   }
 
+  function decodePercentEncodedRuns(text) {
+    return String(text || "").replace(/(?:%[0-9a-f]{2}){2,}/gi, (encoded) => {
+      try {
+        return decodeURIComponent(encoded);
+      } catch {
+        return encoded;
+      }
+    });
+  }
+
   function filenameFromText(text) {
-    const m = String(text || "").match(/([A-Za-z0-9가-힣][A-Za-z0-9가-힣._ ()-]{0,180}\.html?)/i);
+    const decoded = decodePercentEncodedRuns(text);
+    const m = decoded.match(/([A-Za-z0-9가-힣][A-Za-z0-9가-힣._ ()-]{0,180}\.html?)/i);
     return m ? m[1].trim() : "";
   }
 
   function filenamesFromText(text) {
     const names = new Set();
-    const matches = String(text || "").matchAll(/([A-Za-z0-9가-힣][A-Za-z0-9가-힣._ ()-]{0,180}\.html?)/gi);
+    const matches = decodePercentEncodedRuns(text).matchAll(/([A-Za-z0-9가-힣][A-Za-z0-9가-힣._ ()-]{0,180}\.html?)/gi);
     for (const match of matches) {
       names.add(safeDownloadName(match[1].trim()));
     }
@@ -924,9 +939,20 @@
     }
   }
 
+  function isKnownChatGptFileHref(href) {
+    try {
+      const url = new URL(href, location.href);
+      if (/(?:^|\.)oaiusercontent\.com$/i.test(url.hostname)) return true;
+      return url.origin === location.origin && /\/(?:backend-api\/)?files?\/|\/download\//i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  }
+
   function isPlainExternalAnchor(node, href) {
     if (!node?.matches?.("a[href]")) return false;
     if (hasDownloadAttribute(node) || isBlobOrSandboxHref(href)) return false;
+    if (isKnownChatGptFileHref(href)) return false;
     try {
       const url = new URL(href, location.href);
       return /^https?:$/i.test(url.protocol) && url.origin !== location.origin;
@@ -935,10 +961,59 @@
     }
   }
 
+  function hasNearbyArtifactViewer(node) {
+    const messageRoot = node?.closest?.('[data-message-author-role="assistant"]') ||
+      node?.closest?.("article") ||
+      null;
+    if (!messageRoot?.querySelectorAll) return false;
+
+    const buttons = Array.from(messageRoot.querySelectorAll("button"));
+    const hasCodeToggle = buttons.some(button => /^(?:code|coding|코드|코딩)$/i.test(controlLabel(button)));
+    const hasPreviewToggle = buttons.some(isArtifactPreviewToggle);
+    const hasViewer = !!messageRoot.querySelector?.("iframe, .cm-editor, pre.cm-content, [data-testid*='artifact' i]");
+    return hasCodeToggle && hasPreviewToggle && hasViewer;
+  }
+
+  function isLikelyInteractiveHtmlFileCard(node, href = "") {
+    if (!node || node.classList?.contains("gpt2obs-btn")) return false;
+
+    const rawOwnText = [
+      node.getAttribute?.("download") || "",
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("title") || "",
+      node.getAttribute?.("data-testid") || "",
+      node.getAttribute?.("data-file-name") || "",
+      node.getAttribute?.("data-filename") || "",
+      node.innerText || node.textContent || ""
+    ].join(" ");
+    const decodedOwnText = decodePercentEncodedRuns(rawOwnText);
+    const ownFilename = filenameFromText(decodedOwnText) || filenameFromUrl(href);
+    if (!ownFilename || !/\.html?$/i.test(ownFilename)) return false;
+
+    const tagName = String(node.tagName || "").toLowerCase();
+    const role = String(node.getAttribute?.("role") || "").toLowerCase();
+    const isButtonLike = tagName === "button" || role === "button";
+    const isAnchor = tagName === "a" || node.matches?.("a[href]");
+    const explicitFileMarker = /download|다운로드|artifact|attachment|첨부|(?:^|[\s_-])file(?:[\s_-]|$)|파일/i.test(decodedOwnText);
+    const artifactStats = /\d[\d,]*\s*(?:chars?|characters?|문자)\s*[•·]\s*\d[\d,]*\s*(?:words?|단어)/i.test(decodedOwnText);
+    const encodedFilename = /(?:%[0-9a-f]{2}){2,}[^\s]*\.html?/i.test(rawOwnText);
+    const fileHref = /^(?:blob:|sandbox:|data:)/i.test(href) || isKnownChatGptFileHref(href) || /\/(?:backend-api\/)?files?\/|\/download\//i.test(href);
+    const artifactViewerContext = isButtonLike && hasNearbyArtifactViewer(node);
+
+    if (isButtonLike) {
+      return explicitFileMarker || artifactStats || encodedFilename || fileHref || artifactViewerContext;
+    }
+    if (isAnchor && !isPlainExternalAnchor(node, href)) {
+      return explicitFileMarker || artifactStats || encodedFilename || fileHref || hasDownloadAttribute(node);
+    }
+    return explicitFileMarker && (artifactStats || encodedFilename || fileHref);
+  }
+
   function canClickDownloadCandidate(candidate) {
     const node = candidate?.node;
     if (!node) return false;
     if (hasDownloadAttribute(node) || isBlobOrSandboxHref(candidate.href)) return true;
+    if (isLikelyInteractiveHtmlFileCard(node, candidate.href)) return true;
     if (isPlainExternalAnchor(node, candidate.href)) return false;
     return !node.matches?.("a[href]");
   }
@@ -952,7 +1027,13 @@
       "button",
       "[role='button']",
       "[data-testid*='download']",
+      "[data-testid*='artifact' i]",
+      "[data-testid*='file' i]",
+      "[data-file-name]",
+      "[data-filename]",
       "[aria-label*='download' i]",
+      "[aria-label*='file' i]",
+      "[aria-label*='파일' i]",
       "[title*='download' i]"
     ].join(",")));
 
@@ -960,11 +1041,13 @@
     const candidates = [];
     nodes.forEach(node => {
       const href = findDownloadHref(node);
-      const name = safeDownloadName(findNearbyFilename(node) || filenameFromUrl(href) || expectedNames[0]);
-      const marker = `${href} ${node.innerText || ""} ${node.getAttribute?.("aria-label") || ""} ${node.getAttribute?.("title") || ""} ${node.getAttribute?.("data-testid") || ""}`;
+      const ownText = `${node.innerText || node.textContent || ""} ${node.getAttribute?.("download") || ""} ${node.getAttribute?.("data-file-name") || ""} ${node.getAttribute?.("data-filename") || ""}`;
+      const name = safeDownloadName(filenameFromText(ownText) || findNearbyFilename(node) || filenameFromUrl(href) || expectedNames[0]);
+      const marker = decodePercentEncodedRuns(`${href} ${ownText} ${node.getAttribute?.("aria-label") || ""} ${node.getAttribute?.("title") || ""} ${node.getAttribute?.("data-testid") || ""}`);
       const htmlMarker = `${name} ${marker}`;
       const looksLikeHtml = /\.html?(?:$|[?#\s])/i.test(htmlMarker);
-      const looksLikeDownload = /download|다운로드|artifact|attachment|첨부/i.test(marker) || hasDownloadAttribute(node) || isBlobOrSandboxHref(href);
+      const looksLikeFileCard = isLikelyInteractiveHtmlFileCard(node, href);
+      const looksLikeDownload = /download|다운로드|artifact|attachment|첨부/i.test(marker) || hasDownloadAttribute(node) || isBlobOrSandboxHref(href) || looksLikeFileCard;
       if (!looksLikeDownload) return;
       if (!looksLikeHtml && !expectedNames.length) return;
       if (isPlainExternalAnchor(node, href)) return;
@@ -1031,6 +1114,107 @@
       if (content && /<html\b|<!doctype html/i.test(content) && content.length <= 700000) {
         debugLog("captured HTML preview frame", { name, bytes: content.length, scheme: hrefScheme(frame.src) });
         files.push({ name, content });
+      }
+    }
+
+    return files;
+  }
+
+  function controlLabel(node) {
+    return String(
+      node?.getAttribute?.("aria-label") ||
+      node?.getAttribute?.("title") ||
+      node?.innerText ||
+      node?.textContent ||
+      ""
+    ).trim();
+  }
+
+  function isArtifactPreviewToggle(button) {
+    return /^(?:preview|미리\s*보기)$/i.test(controlLabel(button));
+  }
+
+  function findArtifactToggleGroup(button) {
+    if (!button) return null;
+    const explicitGroup = button.closest?.('[role="group"]');
+    let node = explicitGroup || button.parentElement;
+    for (let depth = 0; depth < 8 && node; depth++, node = node.parentElement) {
+      const buttons = Array.from(node.querySelectorAll?.("button") || []);
+      if (buttons.includes(button) && buttons.some(candidate => candidate !== button && isArtifactPreviewToggle(candidate))) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  function isArtifactCodeToggle(button) {
+    if (!/^(?:code|coding|코드|코딩)$/i.test(controlLabel(button))) return false;
+    return !!findArtifactToggleGroup(button);
+  }
+
+  function findArtifactRoot(toggle, container) {
+    let node = toggle;
+    for (let depth = 0; depth < 10 && node; depth++, node = node.parentElement) {
+      if (node.querySelector?.("iframe, pre.cm-content, .cm-editor, pre code")) return node;
+      if (node === container) break;
+    }
+    return container;
+  }
+
+  function extractCompleteHtmlSource(root) {
+    if (!root?.querySelectorAll) return "";
+    const nodes = Array.from(root.querySelectorAll("pre.cm-content, pre code, code, textarea"));
+    for (const node of nodes) {
+      const source = String(node.value || node.innerText || node.textContent || "")
+        .replace(/\r\n?/g, "\n")
+        .trim();
+      if (!source || source.length > 700000) continue;
+      if (!/^\s*(?:<!doctype html>|<html\b)/i.test(source)) continue;
+      if (!/<\/html>\s*$/i.test(source)) continue;
+      return source;
+    }
+    return "";
+  }
+
+  async function readInteractiveHtmlArtifacts(container, expectedNames = [], candidates = []) {
+    const files = [];
+    if (!container) return files;
+    if (!candidates.some(candidate => isLikelyInteractiveHtmlFileCard(candidate.node, candidate.href))) {
+      return files;
+    }
+
+    const toggles = Array.from(container.querySelectorAll("button")).filter(isArtifactCodeToggle);
+    for (let index = 0; index < toggles.length; index++) {
+      const codeToggle = toggles[index];
+      const group = findArtifactToggleGroup(codeToggle);
+      const previewToggle = Array.from(group?.querySelectorAll?.("button") || []).find(isArtifactPreviewToggle);
+      const restorePreview = codeToggle.getAttribute?.("aria-pressed") !== "true" && !!previewToggle;
+      const root = findArtifactRoot(codeToggle, container);
+      let source = extractCompleteHtmlSource(root);
+
+      if (!source) {
+        try {
+          codeToggle.click();
+          for (let attempt = 0; attempt < 20 && !source; attempt++) {
+            await sleep(50);
+            source = extractCompleteHtmlSource(root);
+          }
+        } catch (error) {
+          debugLog("failed to open ChatGPT artifact code view", {
+            index,
+            reason: error?.message || String(error)
+          });
+        }
+      }
+
+      if (source) {
+        const name = safeDownloadName(expectedNames[index] || expectedNames[0] || `chatgpt-artifact-${index + 1}.html`);
+        pushUniqueFile(files, { name, content: source, source: "artifact-code-view" });
+        debugLog("captured ChatGPT artifact code view", { name, bytes: source.length });
+      }
+
+      if (restorePreview) {
+        try { previewToggle.click(); } catch {}
       }
     }
 
@@ -1216,6 +1400,10 @@
       pushUniqueFile(files, previewFile);
     }
 
+    for (const artifactFile of await readInteractiveHtmlArtifacts(container, expectedNames, candidates)) {
+      pushUniqueFile(files, artifactFile);
+    }
+
     for (const codeBlockFile of extractHtmlCodeBlockFiles(answerText, expectedNames)) {
       pushUniqueFile(files, codeBlockFile);
     }
@@ -1326,7 +1514,7 @@
       const attachmentNames = [];
       const hasRealHtmlAttachment = attachments.length > 0 || downloadedAttachments.length > 0;
       if (!hasRealHtmlAttachment && extraction.clickedFallback > 0) {
-        alert(t("htmlDownloadCopyFailedWarning"));
+        alert(t("htmlArtifactCaptureFailedWarning"));
       }
       const currentAssistantNode = closestMessageContainer(btn);
       const previousQa = (settings.usePreviousQaForHtml && hasRealHtmlAttachment)
@@ -1398,7 +1586,7 @@
   }
 
   function injectOwnButtons() {
-    const msgs = document.querySelectorAll('[data-message-author-role="assistant"], article');
+    const msgs = getAllMessageNodes().filter(message => getMessageRole(message) === "assistant");
     msgs.forEach(m => {
       const existing = m.querySelector('.gpt2obs-btn');
       if (existing?.dataset?.gpt2obsVersion === VERSION) {
@@ -1445,6 +1633,12 @@
       makeTitle,
       cleanQuestionText,
       cleanAnswerText,
+      decodePercentEncodedRuns,
+      filenameFromText,
+      hasNearbyArtifactViewer,
+      isLikelyInteractiveHtmlFileCard,
+      extractCompleteHtmlSource,
+      readInteractiveHtmlArtifacts,
       setTestLanguage(language) {
         settings.uiLanguage = normalizeLanguage(language);
       }

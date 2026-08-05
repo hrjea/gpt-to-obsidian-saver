@@ -42,8 +42,8 @@ Check for:
 Create a release commit and annotated RC tag:
 
 ```sh
-git commit -m "Prepare v1.5.20 public release"
-git tag -a v1.5.20-rc.1 -m "Release candidate 1 for v1.5.20"
+git commit -m "Prepare v1.5.25 public release"
+git tag -a v1.5.25-rc.1 -m "Release candidate 1 for v1.5.25"
 ```
 
 Do not overwrite existing tags.
@@ -77,7 +77,7 @@ Confirm:
 Create the final local tag only after required validation and macOS smoke tests pass:
 
 ```sh
-git tag -a v1.5.20 -m "Initial public release v1.5.20"
+git tag -a v1.5.25 -m "Initial public release v1.5.25"
 ```
 
 ## 10. GitHub Publication
