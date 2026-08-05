@@ -4,7 +4,13 @@
 
 GPT to Obsidian Saver is a Chrome extension that saves ChatGPT answers to Obsidian as local Markdown notes. It can also save real downloadable HTML learning materials as note-relative attachments.
 
-Sanitized screenshots and a demo GIF will be added after public-safe capture. See [assets/screenshots/README.md](assets/screenshots/README.md) for the required manual capture process.
+## Demo
+
+![GPT to Obsidian Saver demo](assets/demo.gif)
+
+This 15-second public-safe capture uses a temporary ChatGPT conversation and a test Obsidian vault. It shows a real HTML artifact, the Save to Obsidian action, the generated Markdown note, and the saved HTML learning material.
+
+Selected public-safe screenshots are also available in [assets/screenshots](assets/screenshots). The options-page screenshot remains pending because it must be captured without exposing a local extension ID or vault path.
 
 ## What It Does
 

@@ -4,7 +4,13 @@
 
 GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 저장하는 Chrome 확장 프로그램입니다. 실제 다운로드 가능한 HTML 학습자료도 노트 기준 상대 링크를 가진 첨부파일로 저장할 수 있습니다.
 
-공개용으로 안전하게 캡처한 스크린샷과 데모 GIF는 추후 추가합니다. 필요한 수동 캡처 절차는 [assets/screenshots/README.md](assets/screenshots/README.md)를 참고하세요.
+## 데모
+
+![GPT to Obsidian Saver 데모](assets/demo.gif)
+
+이 15초 공개용 데모는 임시 ChatGPT 대화와 Obsidian 테스트 vault만 사용했습니다. 실제 HTML artifact, Save to Obsidian 실행, 생성된 Markdown 노트, 저장된 HTML 학습자료를 순서대로 보여줍니다.
+
+공개용으로 정리한 스크린샷은 [assets/screenshots](assets/screenshots)에서도 확인할 수 있습니다. 옵션 페이지 화면은 로컬 extension ID와 vault path가 노출되지 않도록 별도로 캡처해야 하므로 아직 포함하지 않았습니다.
 
 ## 기능 요약
 
