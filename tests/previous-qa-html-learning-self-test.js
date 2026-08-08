@@ -30,6 +30,7 @@ class FakeInteractiveNode {
     this.innerText = text;
     this.textContent = text;
     this.attrs = attrs;
+    this.clickCount = 0;
     this.classList = { contains: () => false };
   }
 
@@ -52,10 +53,15 @@ class FakeInteractiveNode {
   closest() {
     return this.closestRoot || null;
   }
+
+  click() {
+    this.clickCount += 1;
+  }
 }
 
 function loadContentHooks() {
   const noop = () => {};
+  const effects = { alerts: 0, messages: [] };
   const fakeElement = {
     querySelectorAll: () => [],
     querySelector: () => null,
@@ -90,13 +96,18 @@ function loadContentHooks() {
         local: { get: (_keys, cb) => cb({}) },
         onChanged: { addListener: noop }
       },
-      runtime: { sendMessage: noop }
+      runtime: {
+        sendMessage: (message, callback) => {
+          effects.messages.push(message);
+          callback?.({ ok: true, watchId: "test-watch" });
+        }
+      }
     },
     setTimeout,
     clearTimeout,
     URL,
     fetch: async () => ({ ok: false, text: async () => "" }),
-    alert: noop,
+    alert: () => { effects.alerts += 1; },
     window: { getSelection: () => "" },
     __GPT_OBSIDIAN_ENABLE_TEST_HOOKS__: true
   };
@@ -104,7 +115,40 @@ function loadContentHooks() {
   const contentPath = path.join(__dirname, "..", "content.js");
   vm.runInNewContext(fs.readFileSync(contentPath, "utf8"), sandbox, { filename: contentPath });
   assert(sandbox.__GPT_OBSIDIAN_TEST_HOOKS__, "content hooks were not exposed");
+  sandbox.__GPT_OBSIDIAN_TEST_HOOKS__.testEffects = effects;
   return sandbox.__GPT_OBSIDIAN_TEST_HOOKS__;
+}
+
+function loadBackgroundHooks() {
+  const noop = () => {};
+  const fakeEvent = { addListener: noop, removeListener: noop };
+  const sandbox = {
+    console,
+    chrome: {
+      downloads: {
+        onCreated: fakeEvent,
+        onChanged: fakeEvent,
+        search: (_query, callback) => callback([])
+      },
+      runtime: {
+        onInstalled: fakeEvent,
+        onMessage: fakeEvent,
+        sendNativeMessage: noop
+      },
+      storage: {
+        sync: { get: (_keys, callback) => callback({}), set: noop }
+      }
+    },
+    setTimeout,
+    clearTimeout,
+    URL,
+    __GPT_OBSIDIAN_ENABLE_TEST_HOOKS__: true
+  };
+  sandbox.globalThis = sandbox;
+  const backgroundPath = path.join(__dirname, "..", "background.js");
+  vm.runInNewContext(fs.readFileSync(backgroundPath, "utf8"), sandbox, { filename: backgroundPath });
+  assert(sandbox.__GPT_OBSIDIAN_BACKGROUND_TEST_HOOKS__, "background hooks were not exposed");
+  return sandbox.__GPT_OBSIDIAN_BACKGROUND_TEST_HOOKS__;
 }
 
 function buildScenarioNote(hooks, nodes, currentNode, hasRealHtmlAttachment, usePreviousQaForHtml) {
@@ -134,7 +178,13 @@ function buildScenarioNote(hooks, nodes, currentNode, hasRealHtmlAttachment, use
 }
 
 const hooks = loadContentHooks();
-assert.strictEqual(hooks.VERSION, "1.5.25");
+const backgroundHooks = loadBackgroundHooks();
+assert.strictEqual(hooks.VERSION, "1.5.30");
+assert.strictEqual(
+  backgroundHooks.DOWNLOAD_WATCH_TIMEOUT_MS,
+  90000,
+  "slow generated HTML downloads should remain inside the current Save watch"
+);
 
 const completeArtifactHtml = "<!doctype html>\n<html lang=\"ko\"><head><title>학습자료</title></head><body>내용</body></html>";
 assert.strictEqual(
@@ -221,6 +271,57 @@ assert.strictEqual(
   "toolbar buttons near filename text must not become file-card candidates"
 );
 
+const rowFileButton = new FakeInteractiveNode("button", "learning_material.html\n12,000 chars • 1,500 words", {
+  "aria-label": "learning_material.html"
+});
+const rowDownloadButton = new FakeInteractiveNode("button", "", {
+  "aria-label": "\uD30C\uC77C \uB2E4\uC6B4\uB85C\uB4DC",
+  "data-file-name": "learning_material.html"
+});
+const misleadingPreviewButton = new FakeInteractiveNode("button", "HTML 학습자료 다운로드");
+const currentArtifactCandidates = hooks.getDownloadCandidates({
+  querySelectorAll: () => [misleadingPreviewButton, rowFileButton, rowDownloadButton]
+}, ["learning_material.html"]);
+assert.strictEqual(currentArtifactCandidates.length, 1, "same-row HTML controls should be deduplicated");
+assert.strictEqual(
+  currentArtifactCandidates[0].node,
+  rowDownloadButton,
+  "the explicit ChatGPT download control must win over the open-file control"
+);
+assert(
+  hooks.downloadCandidateClickPriority(currentArtifactCandidates[0]) > hooks.downloadCandidateClickPriority({
+    node: rowFileButton,
+    href: ""
+  }),
+  "explicit download controls should have the highest fallback click priority"
+);
+assert.strictEqual(hooks.isExactDownloadControl(rowDownloadButton), true);
+assert.strictEqual(
+  hooks.isExactDownloadControl(misleadingPreviewButton),
+  false,
+  "the HTML learning-material preview button must not be treated as the native file download control"
+);
+assert.strictEqual(
+  hooks.getDownloadCandidates({ querySelectorAll: () => [misleadingPreviewButton] }).length,
+  0,
+  "generic download wording without an actual HTML filename must not create a fallback candidate"
+);
+
+const clickOnlyContainer = {
+  querySelector: () => null,
+  querySelectorAll: () => [misleadingPreviewButton, rowFileButton, rowDownloadButton]
+};
+const fakeSaveButton = {
+  closest: (selector) => selector === "[data-message-author-role]" ? clickOnlyContainer : null
+};
+const manualDownloadCandidate = hooks.findUserActivatedDownloadCandidate(fakeSaveButton);
+assert.strictEqual(
+  manualDownloadCandidate?.node,
+  rowDownloadButton,
+  "only the exact file-download button should be offered for the last-resort manual fallback"
+);
+assert.strictEqual(rowDownloadButton.clickCount, 0, "candidate discovery must not trigger a synthetic download click");
+
 const a = new FakeMessageNode("user", "What is retrieval augmented generation?");
 const b = new FakeMessageNode("assistant", "Retrieval augmented generation combines retrieval with generation.");
 const c = new FakeMessageNode("user", "Turn the previous answer into a self-contained HTML learning file.");
@@ -302,12 +403,13 @@ async function testInteractiveArtifactExtraction() {
   const sourceNode = {
     value: "",
     innerText: completeArtifactHtml,
-    textContent: completeArtifactHtml
+    textContent: completeArtifactHtml,
+    getAttribute: () => ""
   };
   const root = {
     parentElement: null,
     querySelector: () => ({}),
-    querySelectorAll: (selector) => selector.includes("pre.cm-content") && sourceVisible ? [sourceNode] : []
+    querySelectorAll: () => []
   };
   const group = {
     parentElement: root,
@@ -342,19 +444,65 @@ async function testInteractiveArtifactExtraction() {
   previewWrapper.querySelectorAll = (selector) => selector === "button" ? [previewToggle] : [];
   group.querySelectorAll = (selector) => selector === "button" ? [codeToggle, previewToggle] : [];
   const container = {
-    querySelectorAll: (selector) => selector === "button" ? [codeToggle, previewToggle] : []
+    innerText: "HTML 학습자료 다운로드\nunity_ai_game_development_learning.html",
+    textContent: "HTML 학습자료 다운로드\nunity_ai_game_development_learning.html",
+    querySelector: (selector) => selector.includes("iframe") ? {} : null,
+    querySelectorAll: (selector) => {
+      if (selector === "button") return [codeToggle, previewToggle];
+      if (selector.includes("a[href]") && selector.includes("button")) {
+        return [rowFileButton, misleadingPreviewButton, rowDownloadButton, codeToggle, previewToggle];
+      }
+      if (selector.includes(".cm-content") && sourceVisible) return [sourceNode];
+      return [];
+    }
   };
+  misleadingPreviewButton.closestRoot = container;
+
+  assert.strictEqual(
+    hooks.hasInteractiveHtmlArtifactCandidate(
+      container,
+      [{ name: "unity_ai_game_development_learning.html", node: misleadingPreviewButton, href: "" }],
+      ["unity_ai_game_development_learning.html"]
+    ),
+    true,
+    "a filename-less HTML learning-material button must activate source extraction when the same message has a real Code/Preview viewer"
+  );
 
   const files = await hooks.readInteractiveHtmlArtifacts(
     container,
     ["artifact-learning-material.html"],
-    [{ node: gpt56FileCard, href: "" }]
+    [{ name: "unity_ai_game_development_learning.html", node: misleadingPreviewButton, href: "" }]
   );
   assert.strictEqual(files.length, 1, "interactive artifact should produce one attachment");
   assert.strictEqual(files[0].name, "artifact-learning-material.html");
   assert.strictEqual(files[0].content, completeArtifactHtml);
   assert.strictEqual(sourceVisible, true, "branch-style artifact toggle should open without role=group");
+  assert.strictEqual(
+    hooks.extractCompleteHtmlSource(container),
+    completeArtifactHtml,
+    "the current CodeMirror contenteditable source should be readable after ChatGPT replaces the preview DOM"
+  );
   assert.strictEqual(previewRestored, true, "preview mode should be restored after extraction");
+
+  const alertsBeforeSaveExtraction = hooks.testEffects.alerts;
+  const messagesBeforeSaveExtraction = hooks.testEffects.messages.length;
+  const extractedWithoutDownload = await hooks.extractDownloadFiles(
+    { closest: (selector) => selector === "[data-message-author-role]" ? container : null },
+    ["artifact-learning-material.html"],
+    ""
+  );
+  assert.strictEqual(extractedWithoutDownload.files.length, 1);
+  assert.strictEqual(extractedWithoutDownload.downloadedFiles.length, 0);
+  assert.strictEqual(
+    hooks.testEffects.alerts,
+    alertsBeforeSaveExtraction,
+    "page-accessible artifact source must not show a manual download prompt"
+  );
+  assert.strictEqual(
+    hooks.testEffects.messages.length,
+    messagesBeforeSaveExtraction,
+    "page-accessible artifact source must not start a chrome.downloads watch"
+  );
 }
 
 testInteractiveArtifactExtraction()

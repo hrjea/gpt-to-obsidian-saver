@@ -1,7 +1,9 @@
 // background.js (service worker)
 const NATIVE_OBSIDIAN_HOST = "com.gpt_obsidian_saver.open_direct";
 const DUPLICATE_TTL_MS = 30000;
-const DOWNLOAD_WATCH_TIMEOUT_MS = 20000;
+// ChatGPT may prepare generated artifacts for tens of seconds before Chrome
+// reports the completed download. Keep this bounded to the current Save action.
+const DOWNLOAD_WATCH_TIMEOUT_MS = 90000;
 const DOWNLOAD_WATCH_RETAIN_MS = 30000;
 const DOWNLOAD_START_GRACE_MS = 3000;
 const recentRequests = new Map();
@@ -330,3 +332,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 });
+
+if (globalThis.__GPT_OBSIDIAN_ENABLE_TEST_HOOKS__) {
+  globalThis.__GPT_OBSIDIAN_BACKGROUND_TEST_HOOKS__ = {
+    DOWNLOAD_WATCH_TIMEOUT_MS
+  };
+}

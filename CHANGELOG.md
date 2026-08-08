@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.30] - 2026-08-08
+
+### Fixed
+
+- Reads the current ChatGPT CodeMirror HTML source before starting any browser-download fallback.
+- Activates source extraction for ChatGPT's filename-less `HTML learning material download` control when the same assistant message contains a real Code/Preview artifact viewer.
+- Re-resolves artifact source nodes after ChatGPT replaces the Preview DOM with the Code view.
+- Recognizes current `.cm-content` and contenteditable editor nodes while keeping complete-document and size validation.
+- Uses a 90-second manual download watch only when direct HTML source extraction fails.
+- Prefers exact `File download` or `파일 다운로드` controls and excludes the `HTML learning material download` preview button.
+- Blocks another save of the same response while its HTML download is being captured.
+- Restores the ChatGPT file-card styling after the download succeeds or the bounded watch ends.
+
 ## [1.5.25] - 2026-07-13
 
 ### Fixed

@@ -1,11 +1,12 @@
 
-// content.js (1.5.25) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.30) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.25";
+  const VERSION = "1.5.30";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
   state.recentSaves = state.recentSaves || new Map();
+  state.activeSaves = state.activeSaves || new Set();
   const generation = state.generation;
   const DEBUG = false;
 
@@ -14,6 +15,7 @@
   const I18N = {
     en: {
       saveButton: "Save to Obsidian",
+      savingButton: "Saving…",
       untitledQuestion: "Untitled question",
       summaryTitle: "Summary title",
       questionHeading: "Question",
@@ -27,10 +29,12 @@
       htmlDownloadNotAttachedWarning: "HTML file was downloaded by Chrome, but the extension could not attach it to the Obsidian note.",
       htmlDownloadCopyFailedWarning: "HTML file was downloaded by Chrome, but could not be copied into the Obsidian vault.",
       htmlArtifactCaptureFailedWarning: "The HTML artifact could not be read or downloaded, so it was not attached to the Obsidian note.",
+      htmlDownloadActionRequired: "The extension could not read the HTML source directly. Close this message, then click the small File download button on the file card once. Do not click the HTML learning material preview button. The extension will wait up to 90 seconds and then save it to Obsidian.",
       htmlAttachmentSavedLine: "HTML file saved as attachment.",
       runtimeUnavailable: "extension runtime unavailable"
     },
     ko: {
+      savingButton: "\uC800\uC7A5 \uC911…",
       saveButton: "Obsidian 저장",
       untitledQuestion: "제목 없는 질문",
       summaryTitle: "요약 제목",
@@ -45,6 +49,7 @@
       htmlDownloadNotAttachedWarning: "HTML 파일이 Chrome으로 다운로드되었지만, 확장 프로그램이 Obsidian 노트에 첨부하지 못했습니다.",
       htmlDownloadCopyFailedWarning: "HTML 파일이 Chrome으로 다운로드되었지만, Obsidian vault로 복사하지 못했습니다.",
       htmlArtifactCaptureFailedWarning: "HTML artifact 내용을 읽거나 다운로드하지 못해 Obsidian 노트에 첨부하지 못했습니다.",
+      htmlDownloadActionRequired: "확장 프로그램이 HTML 원문을 직접 읽지 못했습니다. 이 창을 닫은 뒤 파일 카드 오른쪽의 작은 '파일 다운로드' 버튼을 한 번 눌러주세요. 'HTML 학습자료 다운로드' 미리보기 버튼이 아닙니다. 확장 프로그램은 최대 90초 동안 기다린 후 Obsidian에 저장합니다.",
       htmlAttachmentSavedLine: "HTML 파일은 첨부파일로 저장되었습니다.",
       runtimeUnavailable: "extension runtime을 사용할 수 없습니다"
     }
@@ -84,7 +89,9 @@
 
   function updateInjectedButtonText() {
     document.querySelectorAll(".gpt2obs-btn").forEach((button) => {
-      button.textContent = t("saveButton");
+      if (button.dataset.gpt2obsBusy !== "true") {
+        button.textContent = t("saveButton");
+      }
     });
   }
 
@@ -1018,6 +1025,38 @@
     return !node.matches?.("a[href]");
   }
 
+  function downloadControlLabels(node) {
+    if (!node) return [];
+    return [
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("title") || "",
+      node.innerText || node.textContent || ""
+    ]
+      .map(value => decodePercentEncodedRuns(value).replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+  }
+
+  function isExactDownloadControl(node) {
+    const labels = downloadControlLabels(node);
+    if (labels.some(label => /^(?:download|download file|file download|다운로드|파일 다운로드)$/i.test(label))) {
+      return true;
+    }
+
+    const testId = String(node?.getAttribute?.("data-testid") || "").trim();
+    return /^(?:download|download-button|file-download|file-download-button|download-file|download-file-button)$/i.test(testId);
+  }
+
+  function downloadCandidateClickPriority(candidate) {
+    const node = candidate?.node;
+    if (!node) return 0;
+    if (isExactDownloadControl(node)) return 600;
+    if (hasDownloadAttribute(node)) return 500;
+    if (isBlobOrSandboxHref(candidate.href)) return 400;
+    if (isFetchableDownloadHref(candidate.href)) return 300;
+    if (isLikelyInteractiveHtmlFileCard(node, candidate.href)) return 100;
+    return 10;
+  }
+
   function getDownloadCandidates(container, expectedNames = []) {
     if (!container) return [];
 
@@ -1037,12 +1076,14 @@
       "[title*='download' i]"
     ].join(",")));
 
-    const seen = new Set();
+    const seen = new Map();
     const candidates = [];
     nodes.forEach(node => {
       const href = findDownloadHref(node);
       const ownText = `${node.innerText || node.textContent || ""} ${node.getAttribute?.("download") || ""} ${node.getAttribute?.("data-file-name") || ""} ${node.getAttribute?.("data-filename") || ""}`;
-      const name = safeDownloadName(filenameFromText(ownText) || findNearbyFilename(node) || filenameFromUrl(href) || expectedNames[0]);
+      const detectedName = filenameFromText(ownText) || findNearbyFilename(node) || filenameFromUrl(href) || expectedNames[0] || "";
+      if (!detectedName) return;
+      const name = safeDownloadName(detectedName);
       const marker = decodePercentEncodedRuns(`${href} ${ownText} ${node.getAttribute?.("aria-label") || ""} ${node.getAttribute?.("title") || ""} ${node.getAttribute?.("data-testid") || ""}`);
       const htmlMarker = `${name} ${marker}`;
       const looksLikeHtml = /\.html?(?:$|[?#\s])/i.test(htmlMarker);
@@ -1053,12 +1094,74 @@
       if (isPlainExternalAnchor(node, href)) return;
 
       const key = `${href || "nohref"}::${name}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      candidates.push({ name, href, node });
+      const candidate = { name, href, node };
+      const existingIndex = seen.get(key);
+      if (existingIndex !== undefined) {
+        if (downloadCandidateClickPriority(candidate) > downloadCandidateClickPriority(candidates[existingIndex])) {
+          candidates[existingIndex] = candidate;
+        }
+        return;
+      }
+      seen.set(key, candidates.length);
+      candidates.push(candidate);
     });
 
     return candidates;
+  }
+
+  function hasSynchronousReadableHtmlSource(container) {
+    if (!container?.querySelector) return false;
+    return !!container.querySelector([
+      "iframe[srcdoc]",
+      "iframe[src^='blob:']",
+      "iframe[src^='data:']",
+      "pre.cm-content",
+      ".cm-content",
+      "[role='textbox'][contenteditable='true']",
+      ".cm-editor",
+      "pre code"
+    ].join(","));
+  }
+
+  function findUserActivatedDownloadCandidate(btn) {
+    const container = closestMessageContainer(btn);
+    if (!container || hasSynchronousReadableHtmlSource(container)) return null;
+    return getDownloadCandidates(container)
+      .filter(canClickDownloadCandidate)
+      .filter(candidate => !isFetchableDownloadHref(candidate.href))
+      .filter(candidate => isExactDownloadControl(candidate.node) || hasDownloadAttribute(candidate.node))
+      .sort((a, b) => downloadCandidateClickPriority(b) - downloadCandidateClickPriority(a))[0] || null;
+  }
+
+  function revealDownloadCandidate(candidate) {
+    const changed = [];
+    let node = candidate?.node || null;
+    for (let depth = 0; depth < 4 && node; depth++, node = node.parentElement) {
+      if (!node.style) continue;
+      changed.push({
+        node,
+        pointerEvents: node.style.pointerEvents,
+        opacity: node.style.opacity,
+        outline: node.style.outline,
+        outlineOffset: node.style.outlineOffset
+      });
+      node.style.pointerEvents = "auto";
+      node.style.opacity = "1";
+    }
+    if (candidate?.node?.style) {
+      candidate.node.style.outline = "3px solid #f59e0b";
+      candidate.node.style.outlineOffset = "3px";
+    }
+    try { candidate?.node?.scrollIntoView?.({ block: "center", inline: "nearest" }); } catch {}
+
+    return () => {
+      changed.forEach(item => {
+        item.node.style.pointerEvents = item.pointerEvents;
+        item.node.style.opacity = item.opacity;
+        item.node.style.outline = item.outline;
+        item.node.style.outlineOffset = item.outlineOffset;
+      });
+    };
   }
 
   function sleep(ms) {
@@ -1155,7 +1258,7 @@
   function findArtifactRoot(toggle, container) {
     let node = toggle;
     for (let depth = 0; depth < 10 && node; depth++, node = node.parentElement) {
-      if (node.querySelector?.("iframe, pre.cm-content, .cm-editor, pre code")) return node;
+      if (node.querySelector?.("iframe, pre.cm-content, .cm-content, .cm-editor, pre code")) return node;
       if (node === container) break;
     }
     return container;
@@ -1163,9 +1266,24 @@
 
   function extractCompleteHtmlSource(root) {
     if (!root?.querySelectorAll) return "";
-    const nodes = Array.from(root.querySelectorAll("pre.cm-content, pre code, code, textarea"));
+    const sourceSelector = [
+      "pre.cm-content",
+      ".cm-content",
+      "[role='textbox'][contenteditable='true']",
+      "pre code",
+      "code",
+      "textarea"
+    ].join(",");
+    const nodes = Array.from(root.querySelectorAll(sourceSelector));
+    if (root.matches?.(sourceSelector)) nodes.unshift(root);
     for (const node of nodes) {
-      const source = String(node.value || node.innerText || node.textContent || "")
+      const source = String(
+        node.value ||
+        node.getAttribute?.("aria-valuetext") ||
+        node.innerText ||
+        node.textContent ||
+        ""
+      )
         .replace(/\r\n?/g, "\n")
         .trim();
       if (!source || source.length > 700000) continue;
@@ -1176,10 +1294,39 @@
     return "";
   }
 
+  function extractCurrentArtifactHtmlSource(codeToggle, container) {
+    const currentRoot = findArtifactRoot(codeToggle, container);
+    return extractCompleteHtmlSource(currentRoot) ||
+      (currentRoot !== container ? extractCompleteHtmlSource(container) : "");
+  }
+
+  function hasInteractiveHtmlArtifactCandidate(container, candidates, expectedNames = []) {
+    const candidateMatch = candidates.some(candidate => {
+      const candidateName = candidate?.name || findNearbyFilename(candidate?.node) || filenameFromUrl(candidate?.href || "");
+      if (!/\.html?$/i.test(candidateName)) return false;
+      return isLikelyInteractiveHtmlFileCard(candidate.node, candidate.href) ||
+        isExactDownloadControl(candidate.node) ||
+        hasDownloadAttribute(candidate.node) ||
+        isBlobOrSandboxHref(candidate.href) ||
+        hasNearbyArtifactViewer(candidate.node);
+    });
+    if (candidateMatch) return true;
+
+    const visibleNames = filenamesFromText(container?.innerText || container?.textContent || "");
+    const hasHtmlName = [...expectedNames, ...visibleNames].some(name => /\.html?$/i.test(name || ""));
+    if (!hasHtmlName || !container?.querySelectorAll) return false;
+
+    const buttons = Array.from(container.querySelectorAll("button"));
+    const hasCodeToggle = buttons.some(button => /^(?:code|coding|코드|코딩)$/i.test(controlLabel(button)));
+    const hasPreviewToggle = buttons.some(isArtifactPreviewToggle);
+    const hasViewer = !!container.querySelector?.("iframe, .cm-editor, pre.cm-content, .cm-content, [data-testid*='artifact' i]");
+    return hasCodeToggle && hasPreviewToggle && hasViewer;
+  }
+
   async function readInteractiveHtmlArtifacts(container, expectedNames = [], candidates = []) {
     const files = [];
     if (!container) return files;
-    if (!candidates.some(candidate => isLikelyInteractiveHtmlFileCard(candidate.node, candidate.href))) {
+    if (!hasInteractiveHtmlArtifactCandidate(container, candidates, expectedNames)) {
       return files;
     }
 
@@ -1189,15 +1336,16 @@
       const group = findArtifactToggleGroup(codeToggle);
       const previewToggle = Array.from(group?.querySelectorAll?.("button") || []).find(isArtifactPreviewToggle);
       const restorePreview = codeToggle.getAttribute?.("aria-pressed") !== "true" && !!previewToggle;
-      const root = findArtifactRoot(codeToggle, container);
-      let source = extractCompleteHtmlSource(root);
+      let source = extractCurrentArtifactHtmlSource(codeToggle, container);
 
       if (!source) {
         try {
           codeToggle.click();
-          for (let attempt = 0; attempt < 20 && !source; attempt++) {
-            await sleep(50);
-            source = extractCompleteHtmlSource(root);
+          for (let attempt = 0; attempt < 30 && !source; attempt++) {
+            await sleep(100);
+            const currentToggles = Array.from(container.querySelectorAll("button")).filter(isArtifactCodeToggle);
+            const currentToggle = currentToggles[index] || currentToggles[0] || codeToggle;
+            source = extractCurrentArtifactHtmlSource(currentToggle, container);
           }
         } catch (error) {
           debugLog("failed to open ChatGPT artifact code view", {
@@ -1208,13 +1356,20 @@
       }
 
       if (source) {
-        const name = safeDownloadName(expectedNames[index] || expectedNames[0] || `chatgpt-artifact-${index + 1}.html`);
+        const candidateNames = [
+          ...candidates.map(candidate => candidate.name),
+          ...filenamesFromText(container.innerText || container.textContent || "")
+        ].filter(name => /\.html?$/i.test(name || ""));
+        const name = safeDownloadName(expectedNames[index] || expectedNames[0] || candidateNames[index] || candidateNames[0] || `chatgpt-artifact-${index + 1}.html`);
         pushUniqueFile(files, { name, content: source, source: "artifact-code-view" });
         debugLog("captured ChatGPT artifact code view", { name, bytes: source.length });
       }
 
       if (restorePreview) {
-        try { previewToggle.click(); } catch {}
+        try {
+          const currentPreviewToggle = Array.from(container.querySelectorAll("button")).filter(isArtifactPreviewToggle)[index] || previewToggle;
+          currentPreviewToggle?.click?.();
+        } catch {}
       }
     }
 
@@ -1301,16 +1456,11 @@
     });
   }
 
-  async function cancelHtmlDownloadWatch(watchId) {
-    if (!watchId) return;
-    await sendExtensionMessage({
-      type: "cancel-html-download-watch",
-      watchId
-    });
-  }
-
   async function captureDownloadedHtmlFallback(fallbackCandidates, expectedNames = []) {
-    const candidate = fallbackCandidates.find(canClickDownloadCandidate);
+    const candidate = fallbackCandidates
+      .filter(canClickDownloadCandidate)
+      .filter(item => isExactDownloadControl(item.node) || hasDownloadAttribute(item.node))
+      .sort((a, b) => downloadCandidateClickPriority(b) - downloadCandidateClickPriority(a))[0];
     const downloadedFiles = [];
     const failures = [];
     let clickedFallback = 0;
@@ -1328,21 +1478,26 @@
       watchId = "";
     }
 
-    try {
-      candidate.node?.click?.();
-      clickedFallback++;
-      debugLog("clicked HTML download fallback candidate", { name: candidate.name, watchId });
-    } catch (error) {
-      failures.push({ name: candidate.name, reason: error?.message || String(error) });
-      await cancelHtmlDownloadWatch(watchId);
-      return { downloadedFiles, clickedFallback, failures };
-    }
-
     if (!watchId) {
       return { downloadedFiles, clickedFallback, failures };
     }
 
-    const result = await awaitHtmlDownloadWatch(watchId);
+    const restore = revealDownloadCandidate(candidate);
+    alert(t("htmlDownloadActionRequired"));
+    try { candidate.node?.focus?.({ preventScroll: true }); } catch {}
+    clickedFallback++;
+    debugLog("waiting for user HTML download fallback", {
+      name: candidate.name,
+      watchId,
+      priority: downloadCandidateClickPriority(candidate)
+    });
+
+    let result;
+    try {
+      result = await awaitHtmlDownloadWatch(watchId);
+    } finally {
+      restore();
+    }
     if (result?.ok && result.download) {
       const download = result.download;
       downloadedFiles.push({
@@ -1506,7 +1661,10 @@
       answerText = cleanAnswerText(answerText);
       answerText = stripChatGptFooterLines(answerText);
       const preSaveKey = `${location.href}::${answerText.length}::${questionText.slice(0, 120)}`;
+      if (state.activeSaves.has(preSaveKey)) return;
       if (isDuplicateContentSave(preSaveKey)) return;
+      state.activeSaves.add(preSaveKey);
+      try {
       const hintedAttachmentNames = filenamesFromText(answerText);
       const extraction = await extractDownloadFiles(btn, hintedAttachmentNames, answerText);
       const attachments = extraction.files;
@@ -1576,13 +1734,17 @@
       } else {
         openObsidianURI(uri);
       }
+      } finally {
+        state.activeSaves.delete(preSaveKey);
+      }
     };
 
     if (delayMs > 0) {
-      setTimeout(run, delayMs);
-    } else {
-      run();
+      return new Promise(resolve => {
+        setTimeout(() => resolve(run()), delayMs);
+      });
     }
+    return run();
   }
 
   function injectOwnButtons() {
@@ -1590,7 +1752,9 @@
     msgs.forEach(m => {
       const existing = m.querySelector('.gpt2obs-btn');
       if (existing?.dataset?.gpt2obsVersion === VERSION) {
-        existing.textContent = t("saveButton");
+        if (existing.dataset.gpt2obsBusy !== "true") {
+          existing.textContent = t("saveButton");
+        }
         return;
       }
       if (existing) existing.remove();
@@ -1600,7 +1764,23 @@
       btn.className = "gpt2obs-btn";
       btn.dataset.gpt2obsVersion = VERSION;
       btn.style.cssText = "margin-left:8px;padding:4px 8px;border:1px solid #888;border-radius:6px;background:#f6f6f6;cursor:pointer;font-size:12px;";
-      btn.addEventListener('click', () => handleCopyClick(btn, { preferClipboard: false, delayMs: 0 }));
+      btn.addEventListener('click', () => {
+        if (btn.dataset.gpt2obsBusy === "true") return;
+        btn.dataset.gpt2obsBusy = "true";
+        btn.disabled = true;
+        btn.textContent = t("savingButton");
+        Promise.resolve(handleCopyClick(btn, {
+          preferClipboard: false,
+          delayMs: 0
+        })).catch(error => {
+          console.warn("Failed to save ChatGPT response.", error);
+        }).finally(() => {
+          if (!btn.isConnected) return;
+          btn.dataset.gpt2obsBusy = "false";
+          btn.disabled = false;
+          btn.textContent = t("saveButton");
+        });
+      });
       toolbarHost.appendChild(btn);
     });
   }
@@ -1637,8 +1817,14 @@
       filenameFromText,
       hasNearbyArtifactViewer,
       isLikelyInteractiveHtmlFileCard,
+      isExactDownloadControl,
+      downloadCandidateClickPriority,
+      getDownloadCandidates,
+      findUserActivatedDownloadCandidate,
       extractCompleteHtmlSource,
+      hasInteractiveHtmlArtifactCandidate,
       readInteractiveHtmlArtifacts,
+      extractDownloadFiles,
       setTestLanguage(language) {
         settings.uiLanguage = normalizeLanguage(language);
       }

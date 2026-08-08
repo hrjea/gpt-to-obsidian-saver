@@ -40,7 +40,7 @@ This project is not available through the Chrome Web Store. Do not expect Chrome
 
 ## Install from GitHub Releases
 
-1. Download `gpt-to-obsidian-saver-v1.5.25-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.30-unpacked-extension.zip` from the GitHub Release.
 2. Verify the SHA-256 checksum from `SHA256SUMS.txt`.
 3. Unzip the file.
 4. Open `chrome://extensions`.
@@ -83,7 +83,7 @@ The native host allowed origin must match the actual extension ID shown by Chrom
 ### macOS Native Helper
 
 1. Copy the extension ID from `chrome://extensions`.
-2. Download and unzip `gpt-to-obsidian-saver-v1.5.25-native-host-macos.zip`.
+2. Download and unzip `gpt-to-obsidian-saver-v1.5.30-native-host-macos.zip`.
 3. Run:
 
 ```sh

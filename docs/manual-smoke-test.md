@@ -1,4 +1,4 @@
-# Manual Smoke Test for v1.5.25
+# Manual Smoke Test for v1.5.30
 
 Use only a test vault and a new temporary ChatGPT conversation. Do not use private conversations or a main Obsidian vault.
 
@@ -11,12 +11,12 @@ node tests/previous-qa-html-learning-self-test.js
 
 ## GitHub ZIP Fresh Installation
 
-1. Extract `gpt-to-obsidian-saver-v1.5.25-unpacked-extension.zip` to a fresh temporary folder.
+1. Extract `gpt-to-obsidian-saver-v1.5.30-unpacked-extension.zip` to a fresh temporary folder.
 2. Open `chrome://extensions`.
 3. Enable Developer mode.
 4. Select Load unpacked.
 5. Select the extracted folder containing `manifest.json`.
-6. Confirm version `1.5.25`.
+6. Confirm version `1.5.30`.
 7. Confirm there are no manifest errors.
 
 ## Options
@@ -53,6 +53,26 @@ Pass:
 - HTML link is note-relative and opens from Obsidian.
 - HTML learning-material section appears first.
 - No raw attachment marker remains.
+
+## Page-accessible HTML Artifact
+
+Use a generated HTML artifact with Code and Preview controls. Click Save only once.
+
+Pass:
+
+- The extension switches to Code, reads the complete HTML source, and saves without requiring a Chrome download when the source is page-accessible.
+- The Preview view is restored after source extraction.
+- The HTML file is written into the configured vault attachment folder.
+- Previous-Q&A mode activates when enabled.
+- A second click while the first extraction is active does not start another save.
+- The button shows its saving state while source extraction is active.
+
+## Manual Download Fallback
+
+If direct source extraction is intentionally made unavailable, verify the bounded fallback separately:
+
+- The extension highlights only the small `File download` or `파일 다운로드` control, never the HTML learning-material preview button.
+- After one real click on that exact control, the note and attachment save complete without another Save-button click.
 
 ## HTML Code Block Option OFF
 
