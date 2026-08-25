@@ -1,11 +1,15 @@
 // background.js (service worker)
+const VERSION = "1.5.40";
+const RUNTIME_PING_TYPE = "gpt2obs-runtime-ping";
 const NATIVE_OBSIDIAN_HOST = "com.gpt_obsidian_saver.open_direct";
 const DUPLICATE_TTL_MS = 30000;
 // ChatGPT may prepare generated artifacts for tens of seconds before Chrome
 // reports the completed download. Keep this bounded to the current Save action.
 const DOWNLOAD_WATCH_TIMEOUT_MS = 90000;
+const MARKDOWN_DOWNLOAD_WATCH_TIMEOUT_MS = 90000;
 const DOWNLOAD_WATCH_RETAIN_MS = 30000;
 const DOWNLOAD_START_GRACE_MS = 3000;
+const DOWNLOAD_SEARCH_LIMIT = 50;
 const recentRequests = new Map();
 const activeDownloadWatches = new Map();
 
@@ -56,18 +60,26 @@ function isHtmlPath(value) {
   return /\.html?$/i.test(pathBasename(value));
 }
 
+function isMarkdownPath(value) {
+  return /\.md$/i.test(pathBasename(value));
+}
+
+function isAllowedDownloadPath(value, kind) {
+  return kind === "markdown" ? isMarkdownPath(value) : isHtmlPath(value);
+}
+
 function normalizeDownloadName(value) {
   return pathBasename(value)
     .toLowerCase()
     .replace(/\s+\(\d+\)(?=\.[^.]+$)/, "");
 }
 
-function sanitizeExpectedDownloadNames(value) {
+function sanitizeExpectedDownloadNames(value, kind = "html") {
   if (!Array.isArray(value)) return [];
   const names = [];
   value.forEach(item => {
     const name = normalizeDownloadName(item);
-    if (/\.html?$/i.test(name) && !names.includes(name)) names.push(name);
+    if (isAllowedDownloadPath(name, kind) && !names.includes(name)) names.push(name);
   });
   return names.slice(0, 10);
 }
@@ -80,8 +92,9 @@ function matchesExpectedDownloadName(filename, expectedNames) {
 
 function downloadStartedInWatchWindow(item, watch) {
   const started = Date.parse(item?.startTime || "");
-  if (!Number.isFinite(started)) return true;
-  return started >= watch.startedAt - DOWNLOAD_START_GRACE_MS;
+  if (!Number.isFinite(started)) return watch.kind !== "markdown";
+  return started >= watch.startedAt - DOWNLOAD_START_GRACE_MS &&
+    started <= watch.startedAt + watch.timeoutMs + DOWNLOAD_START_GRACE_MS;
 }
 
 function latestDownload(items) {
@@ -124,20 +137,23 @@ function downloadItemToResponse(item) {
   };
 }
 
-function chooseMatchingHtmlDownload(items, watch) {
-  const htmlItems = items.filter(item => (
+function chooseMatchingDownload(items, watch) {
+  const allowedItems = items.filter(item => (
     item &&
     item.state === "complete" &&
     item.exists !== false &&
     item.filename &&
-    isHtmlPath(item.filename) &&
+    isAllowedDownloadPath(item.filename, watch.kind) &&
     downloadStartedInWatchWindow(item, watch)
   ));
-  if (!htmlItems.length) return null;
+  if (!allowedItems.length) return null;
 
-  const expectedMatches = htmlItems.filter(item => matchesExpectedDownloadName(item.filename, watch.expectedNames));
+  const expectedMatches = allowedItems.filter(item => matchesExpectedDownloadName(item.filename, watch.expectedNames));
   if (expectedMatches.length) return latestDownload(expectedMatches);
-  if (!watch.expectedNames.length || htmlItems.length === 1) return latestDownload(htmlItems);
+  // Markdown is note body content, so never accept a merely recent arbitrary
+  // .md download. It must match the file card selected for this Save action.
+  if (watch.kind === "markdown") return null;
+  if (!watch.expectedNames.length || allowedItems.length === 1) return latestDownload(allowedItems);
   return null;
 }
 
@@ -152,7 +168,7 @@ function checkDownloadWatch(watch) {
       if (Array.isArray(found) && found[0]) items.push(found[0]);
       pending -= 1;
       if (pending === 0) {
-        const match = chooseMatchingHtmlDownload(items, watch);
+        const match = chooseMatchingDownload(items, watch);
         if (match) {
           finishDownloadWatch(watch, {
             ok: true,
@@ -164,16 +180,41 @@ function checkDownloadWatch(watch) {
   });
 }
 
-function beginHtmlDownloadWatch(message) {
+function seedDownloadWatchFromRecentItems(watch) {
+  try {
+    chrome.downloads.search({
+      limit: DOWNLOAD_SEARCH_LIMIT,
+      orderBy: ["-startTime"]
+    }, (items) => {
+      if (watch.done) return;
+      for (const item of Array.isArray(items) ? items : []) {
+        if (!item?.filename || !isAllowedDownloadPath(item.filename, watch.kind)) continue;
+        if (!downloadStartedInWatchWindow(item, watch)) continue;
+        watch.ids.add(item.id);
+      }
+      checkDownloadWatch(watch);
+    });
+  } catch {}
+}
+
+function beginDownloadWatch(message, kind = "html") {
   if (!chrome.downloads?.onCreated || !chrome.downloads?.onChanged) {
     return { ok: false, error: "downloads permission is unavailable" };
   }
 
+  const expectedNames = sanitizeExpectedDownloadNames(message.expectedNames, kind);
+  if (kind === "markdown" && expectedNames.length === 0) {
+    return { ok: false, error: "markdown download watch requires an exact expected filename" };
+  }
+
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const timeoutMs = kind === "markdown" ? MARKDOWN_DOWNLOAD_WATCH_TIMEOUT_MS : DOWNLOAD_WATCH_TIMEOUT_MS;
   const watch = {
     id,
+    kind,
     startedAt: Number(message.startedAt) || Date.now(),
-    expectedNames: sanitizeExpectedDownloadNames(message.expectedNames),
+    expectedNames,
+    timeoutMs,
     ids: new Set(),
     waiters: [],
     done: false,
@@ -201,15 +242,52 @@ function beginHtmlDownloadWatch(message) {
   chrome.downloads.onCreated.addListener(watch.onCreated);
   chrome.downloads.onChanged.addListener(watch.onChanged);
   watch.timeoutId = setTimeout(() => {
-    finishDownloadWatch(watch, { ok: false, error: "html-download-watch-timeout" });
-  }, DOWNLOAD_WATCH_TIMEOUT_MS);
+    finishDownloadWatch(watch, { ok: false, error: `${kind}-download-watch-timeout` });
+  }, timeoutMs);
   activeDownloadWatches.set(id, watch);
+  // A synthetic file-card click can race service-worker startup. Search only
+  // the bounded current-action window so that the just-created download is
+  // still found without ever selecting an old Downloads file.
+  seedDownloadWatchFromRecentItems(watch);
 
   return {
     ok: true,
     watchId: id,
-    timeoutMs: DOWNLOAD_WATCH_TIMEOUT_MS
+    timeoutMs
   };
+}
+
+function beginHtmlDownloadWatch(message) {
+  return beginDownloadWatch(message, "html");
+}
+
+function beginMarkdownDownloadWatch(message) {
+  return beginDownloadWatch(message, "markdown");
+}
+
+function awaitDownloadWatch(message, kind, sendResponse) {
+  const watch = activeDownloadWatches.get(message.watchId);
+  if (!watch || watch.kind !== kind) {
+    sendResponse({ ok: false, error: "download watch not found" });
+    return false;
+  }
+  if (watch.done) {
+    sendResponse(watch.result || { ok: false, error: "download watch finished without result" });
+    return false;
+  }
+  watch.waiters.push(sendResponse);
+  return true;
+}
+
+function cancelDownloadWatch(message, kind, sendResponse) {
+  const watch = activeDownloadWatches.get(message.watchId);
+  if (watch && watch.kind === kind) {
+    finishDownloadWatch(watch, { ok: false, error: "download watch cancelled" });
+    clearTimeout(watch.retainTimer);
+    activeDownloadWatches.delete(message.watchId);
+  }
+  sendResponse({ ok: true });
+  return false;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -226,34 +304,35 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === RUNTIME_PING_TYPE) {
+    sendResponse({ ok: true, pong: true, version: VERSION });
+    return false;
+  }
+
   if (msg && msg.type === "begin-html-download-watch") {
     sendResponse(beginHtmlDownloadWatch(msg));
     return false;
   }
 
+  if (msg && msg.type === "begin-markdown-download-watch") {
+    sendResponse(beginMarkdownDownloadWatch(msg));
+    return false;
+  }
+
   if (msg && msg.type === "await-html-download-watch" && msg.watchId) {
-    const watch = activeDownloadWatches.get(msg.watchId);
-    if (!watch) {
-      sendResponse({ ok: false, error: "download watch not found" });
-      return false;
-    }
-    if (watch.done) {
-      sendResponse(watch.result || { ok: false, error: "download watch finished without result" });
-      return false;
-    }
-    watch.waiters.push(sendResponse);
-    return true;
+    return awaitDownloadWatch(msg, "html", sendResponse);
+  }
+
+  if (msg && msg.type === "await-markdown-download-watch" && msg.watchId) {
+    return awaitDownloadWatch(msg, "markdown", sendResponse);
   }
 
   if (msg && msg.type === "cancel-html-download-watch" && msg.watchId) {
-    const watch = activeDownloadWatches.get(msg.watchId);
-    if (watch) {
-      finishDownloadWatch(watch, { ok: false, error: "download watch cancelled" });
-      clearTimeout(watch.retainTimer);
-      activeDownloadWatches.delete(msg.watchId);
-    }
-    sendResponse({ ok: true });
-    return false;
+    return cancelDownloadWatch(msg, "html", sendResponse);
+  }
+
+  if (msg && msg.type === "cancel-markdown-download-watch" && msg.watchId) {
+    return cancelDownloadWatch(msg, "markdown", sendResponse);
   }
 
   if (msg && msg.type === "open-obsidian-uri" && msg.uri) {
@@ -288,6 +367,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const attachmentKey = [
       ...(Array.isArray(payload.attachments) ? payload.attachments.map(item => item?.name || "") : []),
       ...(Array.isArray(payload.downloadedAttachments) ? payload.downloadedAttachments.map(item => `${item?.name || ""}:${item?.sourcePath || ""}:${item?.downloadId || ""}`) : []),
+      payload.downloadedMarkdown ? `${payload.downloadedMarkdown.name || ""}:${payload.downloadedMarkdown.sourcePath || ""}:${payload.downloadedMarkdown.downloadId || ""}` : "",
       ...(Array.isArray(payload.attachmentNames) ? payload.attachmentNames : [])
     ].join("|");
     const saveKey = [
@@ -310,6 +390,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       content: payload.content,
       attachments: Array.isArray(payload.attachments) ? payload.attachments : [],
       downloadedAttachments: Array.isArray(payload.downloadedAttachments) ? payload.downloadedAttachments : [],
+      downloadedMarkdown: payload.downloadedMarkdown && typeof payload.downloadedMarkdown === "object" ? payload.downloadedMarkdown : null,
       attachmentNames: Array.isArray(payload.attachmentNames) ? payload.attachmentNames : [],
       htmlSaveDir: payload.htmlSaveDir || "",
       htmlCodeBlockReplacementText: payload.htmlCodeBlockReplacementText || ""
@@ -326,6 +407,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         native: true,
         notePath: response.notePath,
         attachments: response.attachments,
+        detailedMarkdown: response.detailedMarkdown || null,
         warnings: response.warnings || []
       });
     });
@@ -335,6 +417,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 if (globalThis.__GPT_OBSIDIAN_ENABLE_TEST_HOOKS__) {
   globalThis.__GPT_OBSIDIAN_BACKGROUND_TEST_HOOKS__ = {
-    DOWNLOAD_WATCH_TIMEOUT_MS
+    DOWNLOAD_WATCH_TIMEOUT_MS,
+    MARKDOWN_DOWNLOAD_WATCH_TIMEOUT_MS,
+    sanitizeExpectedDownloadNames,
+    chooseMatchingDownload,
+    downloadStartedInWatchWindow
   };
 }

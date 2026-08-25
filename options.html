@@ -11,12 +11,21 @@
     .row { margin: 16px 0; }
     .hint { color:#666; font-size: 12px; }
     .diagnostic { margin: 8px 0 18px; padding: 8px; border: 1px solid #bbb; border-radius: 6px; background: #f7f7f7; color: #333; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .path-diagnostic { padding: 12px; border: 1px solid #bbb; border-radius: 8px; background: #fafafa; }
+    .path-diagnostic-title { font-weight: 700; margin-bottom: 4px; }
+    .path-source { color: #666; font-size: 12px; margin-bottom: 10px; }
+    .path-line { margin: 6px 0; overflow-wrap: anywhere; }
+    .path-line code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .warning { margin-top: 10px; padding: 9px; border: 1px solid #b26a00; border-radius: 6px; background: #fff7e6; color: #6d3d00; }
+    .path-actions { margin-top: 10px; }
     button { padding:10px 14px; border-radius:8px; border:1px solid #333; background:#111; color:white; cursor:pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    button.secondary { padding: 7px 10px; background: white; color: #222; border-color: #777; }
   </style>
 </head>
 <body>
   <h1>GPT → Obsidian Saver</h1>
-  <div id="buildDiagnostic" class="diagnostic">Build version 1.5.30 | saveHtmlCodeBlocksAsAttachments: loading | usePreviousQaForHtml: loading | content script VERSION: 1.5.30</div>
+  <div id="buildDiagnostic" class="diagnostic">Build version 1.5.40 | saveHtmlCodeBlocksAsAttachments: loading | usePreviousQaForHtml: loading | content script VERSION: 1.5.40</div>
   <div class="row">
     <label for="uiLanguage" data-i18n="uiLanguageLabel">Language</label>
     <select id="uiLanguage">
@@ -44,6 +53,16 @@
     <label for="htmlSaveDir" data-i18n="htmlSaveDirLabel">HTML file save folder</label>
     <input id="htmlSaveDir" type="text" placeholder="Leave empty for Attachments" data-i18n-placeholder="htmlSaveDirPlaceholder">
     <div class="hint" data-i18n="htmlSaveDirHint">Relative paths are resolved inside the vault. Absolute paths are allowed only inside vaultPath. Default is Attachments inside the vault.</div>
+  </div>
+  <div class="row">
+    <div id="pathDiagnostic" class="path-diagnostic" aria-live="polite">
+      <div class="path-diagnostic-title" data-i18n="resolvedPathsHeading">Resolved save paths</div>
+      <div id="pathDiagnosticSource" class="path-source">Current form preview</div>
+      <div class="path-line"><strong data-i18n="resolvedNotePathLabel">Markdown note folder</strong>: <code id="resolvedNotePath"></code></div>
+      <div class="path-line"><strong data-i18n="resolvedHtmlPathLabel">HTML attachment folder</strong>: <code id="resolvedHtmlPath"></code></div>
+      <div id="pathMismatchWarning" class="warning" hidden></div>
+      <div class="path-actions"><button id="resetHtmlDirBtn" class="secondary" type="button">Set HTML folder</button></div>
+    </div>
   </div>
   <div class="row">
     <label><input id="prefixDate" type="checkbox" checked> <span data-i18n="prefixDateLabel">Add date prefix (YYYY-MM-DD) to file names</span></label>

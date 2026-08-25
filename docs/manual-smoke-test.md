@@ -1,4 +1,4 @@
-# Manual Smoke Test for v1.5.30
+# Manual Smoke Test for v1.5.40
 
 Use only a test vault and a new temporary ChatGPT conversation. Do not use private conversations or a main Obsidian vault.
 
@@ -7,16 +7,18 @@ Use only a test vault and a new temporary ChatGPT conversation. Do not use priva
 ```sh
 ./scripts/validate-release.sh
 node tests/previous-qa-html-learning-self-test.js
+node tests/generated-markdown-and-multi-html-self-test.js
+node tests/options-path-settings-self-test.js
 ```
 
 ## GitHub ZIP Fresh Installation
 
-1. Extract `gpt-to-obsidian-saver-v1.5.30-unpacked-extension.zip` to a fresh temporary folder.
+1. Extract the v1.5.40 unpacked-extension ZIP to a fresh temporary folder.
 2. Open `chrome://extensions`.
 3. Enable Developer mode.
 4. Select Load unpacked.
 5. Select the extracted folder containing `manifest.json`.
-6. Confirm version `1.5.30`.
+6. Confirm version `1.5.40`.
 7. Confirm there are no manifest errors.
 
 ## Options
@@ -30,6 +32,12 @@ Configure:
 - HTML file save folder: a test-only attachment folder.
 - Save HTML code blocks as `.html` attachments: test both OFF and ON.
 - Use previous Q&A for HTML learning notes: test both OFF and ON.
+
+Pass:
+
+- Options displays the final Markdown and HTML paths.
+- A deliberate `ChatGPT` versus `ChatGPT_Test/Attachments` mismatch produces a visible warning without blocking Save.
+- The reset action prepares `<note folder>/Attachments` and the warning clears after Save verifies the stored value.
 
 ## Normal Markdown Note
 
@@ -73,6 +81,38 @@ If direct source extraction is intentionally made unavailable, verify the bounde
 
 - The extension highlights only the small `File download` or `파일 다운로드` control, never the HTML learning-material preview button.
 - After one real click on that exact control, the note and attachment save complete without another Save-button click.
+
+## Generated Detailed Markdown Artifact
+
+Ask ChatGPT to create one detailed `.md` artifact and at least one real HTML artifact in the same response. Click Save once.
+
+Pass:
+
+- The note contains exactly one `# 장별 상세 한국어 요약` heading and the complete generated Markdown body.
+- Hidden duplicate file-card rows do not create an ambiguity warning.
+- If ChatGPT replaces the row after opening it, the current visible row and exact download control are re-resolved.
+- A filename-less flyout is accepted only when it is the single newly visible flyout with one readable Markdown body.
+- A nested outer `stage-thread-flyout` and inner `screen-threadFlyOut` with the same readable body are treated as one viewer without a 90-second ambiguity warning.
+- Two independent visible viewers with the same filename and different readable bodies remain ambiguous.
+- Multiple new readable flyouts fail safely instead of being guessed.
+- When a real click is requested, a click made after 30 seconds but within 90 seconds is still captured.
+- No raw `%%GPT_OBSIDIAN_DETAILED_MARKDOWN%%` marker remains.
+
+## Runtime Reload During Save
+
+Use only a disposable test conversation and test vault.
+
+1. Start a generated-artifact Save that enters a bounded viewer or download wait.
+2. Reload the unpacked extension from `chrome://extensions` before the wait completes.
+
+Pass:
+
+- The operation stops without waiting the full 90 seconds.
+- Delayed prompts and the current exact-name download watch are cleared.
+- No native save is attempted from the invalidated content-script context.
+- No URI fallback is reported as a confirmed saved note.
+- One message instructs the user to refresh the ChatGPT tab and try Save again.
+- After refreshing the tab, a new Save action can start normally.
 
 ## HTML Code Block Option OFF
 

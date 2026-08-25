@@ -179,11 +179,60 @@ function buildScenarioNote(hooks, nodes, currentNode, hasRealHtmlAttachment, use
 
 const hooks = loadContentHooks();
 const backgroundHooks = loadBackgroundHooks();
-assert.strictEqual(hooks.VERSION, "1.5.30");
+assert.strictEqual(hooks.VERSION, "1.5.40");
 assert.strictEqual(
   backgroundHooks.DOWNLOAD_WATCH_TIMEOUT_MS,
   90000,
   "slow generated HTML downloads should remain inside the current Save watch"
+);
+assert.strictEqual(backgroundHooks.MARKDOWN_DOWNLOAD_WATCH_TIMEOUT_MS, 90000);
+
+const markdownWatchStartedAt = Date.parse("2026-08-25T05:00:00.000Z");
+const markdownWatch = {
+  kind: "markdown",
+  startedAt: markdownWatchStartedAt,
+  timeoutMs: backgroundHooks.MARKDOWN_DOWNLOAD_WATCH_TIMEOUT_MS,
+  expectedNames: backgroundHooks.sanitizeExpectedDownloadNames(
+    ["code-for-all-detailed-summary-ko.md"],
+    "markdown"
+  )
+};
+const currentMarkdownDownload = {
+  id: 51,
+  filename: "/Users/example/Downloads/code-for-all-detailed-summary-ko (1).md",
+  state: "complete",
+  exists: true,
+  startTime: "2026-08-25T05:00:01.000Z"
+};
+assert.strictEqual(
+  backgroundHooks.chooseMatchingDownload([
+    {
+      ...currentMarkdownDownload,
+      id: 49,
+      filename: "/Users/example/Downloads/unrelated.md"
+    },
+    currentMarkdownDownload
+  ], markdownWatch).id,
+  51,
+  "Chrome duplicate suffixes should still match the exact current Markdown card"
+);
+assert.strictEqual(
+  backgroundHooks.chooseMatchingDownload([{
+    ...currentMarkdownDownload,
+    id: 52,
+    filename: "/Users/example/Downloads/unrelated.md"
+  }], markdownWatch),
+  null,
+  "a recent arbitrary Markdown download must never be selected"
+);
+assert.strictEqual(
+  backgroundHooks.chooseMatchingDownload([{
+    ...currentMarkdownDownload,
+    id: 53,
+    startTime: "2026-08-25T04:50:00.000Z"
+  }], markdownWatch),
+  null,
+  "an old exact-name Markdown download must never be selected"
 );
 
 const completeArtifactHtml = "<!doctype html>\n<html lang=\"ko\"><head><title>학습자료</title></head><body>내용</body></html>";
@@ -409,7 +458,7 @@ async function testInteractiveArtifactExtraction() {
   const root = {
     parentElement: null,
     querySelector: () => ({}),
-    querySelectorAll: () => []
+    querySelectorAll: (selector) => selector.includes(".cm-content") && sourceVisible ? [sourceNode] : []
   };
   const group = {
     parentElement: root,
@@ -450,7 +499,7 @@ async function testInteractiveArtifactExtraction() {
     querySelectorAll: (selector) => {
       if (selector === "button") return [codeToggle, previewToggle];
       if (selector.includes("a[href]") && selector.includes("button")) {
-        return [rowFileButton, misleadingPreviewButton, rowDownloadButton, codeToggle, previewToggle];
+        return [misleadingPreviewButton, codeToggle, previewToggle];
       }
       if (selector.includes(".cm-content") && sourceVisible) return [sourceNode];
       return [];
@@ -470,11 +519,11 @@ async function testInteractiveArtifactExtraction() {
 
   const files = await hooks.readInteractiveHtmlArtifacts(
     container,
-    ["artifact-learning-material.html"],
+    ["unity_ai_game_development_learning.html"],
     [{ name: "unity_ai_game_development_learning.html", node: misleadingPreviewButton, href: "" }]
   );
   assert.strictEqual(files.length, 1, "interactive artifact should produce one attachment");
-  assert.strictEqual(files[0].name, "artifact-learning-material.html");
+  assert.strictEqual(files[0].name, "unity_ai_game_development_learning.html");
   assert.strictEqual(files[0].content, completeArtifactHtml);
   assert.strictEqual(sourceVisible, true, "branch-style artifact toggle should open without role=group");
   assert.strictEqual(
@@ -488,7 +537,7 @@ async function testInteractiveArtifactExtraction() {
   const messagesBeforeSaveExtraction = hooks.testEffects.messages.length;
   const extractedWithoutDownload = await hooks.extractDownloadFiles(
     { closest: (selector) => selector === "[data-message-author-role]" ? container : null },
-    ["artifact-learning-material.html"],
+    ["unity_ai_game_development_learning.html"],
     ""
   );
   assert.strictEqual(extractedWithoutDownload.files.length, 1);

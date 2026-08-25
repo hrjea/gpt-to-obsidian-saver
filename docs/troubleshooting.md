@@ -4,6 +4,8 @@
 
 Reload the extension in `chrome://extensions`, confirm the displayed version, then refresh existing ChatGPT tabs. Content scripts from an older build can remain active until the page is refreshed.
 
+If Save reports that the extension was reloaded or lost its connection to the ChatGPT tab, refresh that tab before trying again. The extension now stops the current artifact operation, cancels its bounded download watch, and does not describe an unverifiable URI attempt as a successful note save.
+
 ## Developer-Mode Extension Warning
 
 Chrome may warn about developer-mode extensions because GitHub Releases are installed with Load unpacked. This is expected for the current distribution model.
@@ -58,6 +60,20 @@ Confirm:
 
 Plain filename text such as `options 2.html` and `example 1.html` should not create attachments.
 
+## Detailed Markdown Artifact Was Not Added to the Note
+
+Generated detailed `.md` files are read from the matching ChatGPT file card or from the exact download started by the current Save action. If ChatGPT blocks a synthetic click, follow the prompt and click the highlighted Markdown filename card or its exact `File download` / `파일 다운로드` control once. The bounded viewer and download window is 90 seconds.
+
+If capture still fails, open the page console and look for `[GPT→Obsidian][artifact]` entries. These diagnostics contain filenames, row visibility, control labels, runtime-failure phase, and candidate counts, but not the generated Markdown body. A warning that activation failed is different from a warning that activation was attempted but the current download could not be tracked, and both differ from a warning that no exact control exists.
+
+ChatGPT can render one visible Markdown viewer as a nested outer `stage-thread-flyout` and inner `screen-threadFlyOut`. The extension treats that pair as one viewer. Two independent visible viewers with the same filename remain an ambiguity and are not guessed.
+
+## Note and HTML Folders Resolve to Different Roots
+
+Options shows the final Markdown note path and HTML attachment path computed from the stored settings. A warning appears when the first relative folder differs, such as `ChatGPT` versus `ChatGPT_Test`.
+
+Saving remains allowed because custom layouts are supported. To restore the conventional layout, use the button that sets the HTML folder to `<note folder>/Attachments`, then click Save. The page reads both storage areas again and reports when the persisted values have been verified.
+
 ## HTML Downloaded but Not Copied to Vault
 
 This means Chrome downloaded an HTML file but the native helper did not copy it. Check:
@@ -76,6 +92,8 @@ If `%%GPT_OBSIDIAN_ATTACHMENTS%%` remains in the note after a successful native 
 
 The native helper generates links relative to the note's parent folder. Check whether the linked `.html` file exists in the configured attachment folder. If the file exists but the link is wrong, report the note path, attachment path, and link text using generic placeholders.
 
+When a self-contained HTML file includes all chapter content but still links to missing paths such as `chapters/00-overview.html`, the helper redirects each link to a unique matching embedded chapter anchor such as `#ch-00-title`. Real separately captured chapter files remain preferred. Ambiguous or unmatched chapter links remain unchanged and produce a warning.
+
 ## vaultPath Missing or Invalid
 
 Native-helper mode requires a local vault path. Use an absolute path to the Obsidian vault root. The helper rejects missing paths, nonexistent paths, and paths that are not directories.
@@ -87,6 +105,12 @@ Relative `htmlSaveDir` values are resolved inside the vault. Absolute paths are 
 ## Obsidian URI Does Not Open
 
 Check that Obsidian is installed and URI handling is enabled. Try opening a simple `obsidian://` URI from the browser or terminal. URI mode depends on local OS and Obsidian URI handling.
+
+## Note Exists on Disk but Not in Obsidian's File Explorer
+
+First confirm that the configured vault path and note folder point to the vault currently open in Obsidian. If the Markdown file exists there but Obsidian search and File Explorer do not show it, quit Obsidian normally and reopen the vault so its filesystem index is rebuilt. Do not run the command that reloads the app without saving.
+
+This can affect files written by an external native helper even though the note and attachments were saved successfully. Reopening Obsidian does not require creating a duplicate note.
 
 ## Favicon Appears as a Large Image
 

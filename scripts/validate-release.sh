@@ -69,6 +69,8 @@ for file in content.js background.js options.js; do
   check_cmd "syntax $file" node --check "$file"
 done
 check_cmd "content behavior self-test" node tests/previous-qa-html-learning-self-test.js
+check_cmd "generated artifact mapping self-test" node tests/generated-markdown-and-multi-html-self-test.js
+check_cmd "options path persistence self-test" node tests/options-path-settings-self-test.js
 
 check_cmd "manifest JSON" python3 -m json.tool manifest.json
 check_cmd "English locale JSON" python3 -m json.tool _locales/en/messages.json
@@ -100,6 +102,8 @@ required_files=(
   docs/codex-for-oss-application-notes.md assets/screenshots/README.md
   scripts/validate-release.sh scripts/package-release.sh
   tests/previous-qa-html-learning-self-test.js
+  tests/generated-markdown-and-multi-html-self-test.js
+  tests/options-path-settings-self-test.js
   .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml
   .github/ISSUE_TEMPLATE/config.yml .github/PULL_REQUEST_TEMPLATE.md
   native-host/native-open-obsidian.py native-host/native-open-obsidian.sh native-host/native-open-obsidian.cmd

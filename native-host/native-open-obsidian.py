@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import hashlib
+from html import escape as html_escape, unescape as html_unescape
+from html.parser import HTMLParser
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -7,11 +10,15 @@ import struct
 import subprocess
 import sys
 import tempfile
-from urllib.parse import quote, urlparse
+import time
+import unicodedata
+from urllib.parse import quote, unquote, urlparse, urlsplit
 
 
 HOST_NAME = "com.gpt_obsidian_saver.open_direct"
 ATTACHMENT_MARKER = "%%GPT_OBSIDIAN_ATTACHMENTS%%"
+DETAILED_MARKDOWN_MARKER = "%%GPT_OBSIDIAN_DETAILED_MARKDOWN%%"
+DETAILED_MARKDOWN_HEADING = "장별 상세 한국어 요약"
 ATTACHMENT_SECTION_MARKERS = [
     f"\n\n## Attachments\n\n{ATTACHMENT_MARKER}",
     f"\n\n## 첨부파일\n\n{ATTACHMENT_MARKER}",
@@ -20,10 +27,31 @@ MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 MAX_ATTACHMENTS = 20
 MAX_ATTACHMENT_CHARS = 700_000
 MAX_TOTAL_ATTACHMENT_BYTES = 5 * 1024 * 1024
+MAX_GENERATED_MARKDOWN_CHARS = 2_000_000
+MAX_GENERATED_MARKDOWN_BYTES = 8 * 1024 * 1024
+NOTE_OPEN_DELAY_SECONDS = 1.0
+ANCHOR_HREF_RE = re.compile(r'(<a\b[^>]*?\bhref\s*=\s*)(["\'])(.*?)\2', re.I | re.S)
 
 
 class NativeHostError(Exception):
     pass
+
+
+class HtmlIdCollector(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.ids = set()
+
+    def collect_id(self, attrs):
+        for name, value in attrs:
+            if str(name or "").lower() == "id" and value:
+                self.ids.add(str(value))
+
+    def handle_starttag(self, _tag, attrs):
+        self.collect_id(attrs)
+
+    def handle_startendtag(self, _tag, attrs):
+        self.collect_id(attrs)
 
 
 def configure_windows_binary_stdio():
@@ -246,6 +274,17 @@ def unique_path(path):
     raise NativeHostError("could not create a unique file path")
 
 
+def unique_path_with_reserved(path, reserved):
+    if not path.exists() and path not in reserved:
+        return path
+
+    for index in range(2, 10_000):
+        candidate = path.with_name(f"{path.stem}-{index}{path.suffix}")
+        if not candidate.exists() and candidate not in reserved:
+            return candidate
+    raise NativeHostError("could not create a unique reserved file path")
+
+
 def sanitize_attachment_filename(value, default="attachment.html"):
     raw = str(value or default)
     raw = raw.replace("\x00", "")
@@ -321,17 +360,96 @@ def read_downloaded_attachment_content(asset, index):
     return name, text, resolved
 
 
+def read_downloaded_markdown_content(asset):
+    if not isinstance(asset, dict):
+        raise NativeHostError("downloadedMarkdown must be an object")
+
+    download_id = asset.get("downloadId")
+    if not isinstance(download_id, int) or download_id < 0:
+        raise NativeHostError("downloadedMarkdown downloadId is required")
+
+    raw_source = asset.get("sourcePath", "")
+    if not isinstance(raw_source, str) or not raw_source.strip():
+        raise NativeHostError("downloadedMarkdown sourcePath is required")
+    if "\x00" in raw_source:
+        raise NativeHostError("downloadedMarkdown sourcePath must not contain null bytes")
+
+    source = Path(raw_source)
+    if not source.is_absolute():
+        raise NativeHostError("downloadedMarkdown sourcePath must be absolute")
+    if source.is_symlink():
+        raise NativeHostError("downloadedMarkdown sourcePath must not be a symbolic link")
+
+    try:
+        resolved = source.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise NativeHostError("downloadedMarkdown source file does not exist") from exc
+
+    if not resolved.is_file():
+        raise NativeHostError("downloadedMarkdown sourcePath must be a file")
+    if resolved.suffix.lower() != ".md":
+        raise NativeHostError("downloadedMarkdown must be a .md file")
+
+    expected_name = Path(str(asset.get("name") or resolved.name)).name
+    if not expected_name.lower().endswith(".md"):
+        raise NativeHostError("downloadedMarkdown name must end with .md")
+
+    byte_size = resolved.stat().st_size
+    if byte_size <= 0:
+        raise NativeHostError("downloadedMarkdown source file is empty")
+    if byte_size > MAX_GENERATED_MARKDOWN_BYTES:
+        raise NativeHostError("downloadedMarkdown source file is too large")
+
+    text = resolved.read_bytes().decode("utf-8", errors="replace")
+    text = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    if len(text) > MAX_GENERATED_MARKDOWN_CHARS:
+        raise NativeHostError("downloadedMarkdown content is too large")
+
+    body = text.replace(ATTACHMENT_MARKER, "GPT_OBSIDIAN_ATTACHMENTS")
+    body = body.replace(DETAILED_MARKDOWN_MARKER, "GPT_OBSIDIAN_DETAILED_MARKDOWN")
+    body = re.sub(
+        rf"^# {re.escape(DETAILED_MARKDOWN_HEADING)}\s*$",
+        "",
+        body,
+        flags=re.M,
+    ).strip()
+    if not body:
+        raise NativeHostError("downloadedMarkdown content is empty")
+
+    return body, resolved, expected_name
+
+
+def replace_downloaded_markdown_marker(content, downloaded_markdown):
+    marker_count = content.count(DETAILED_MARKDOWN_MARKER)
+    if not downloaded_markdown:
+        if marker_count:
+            raise NativeHostError("detailed Markdown marker requires downloadedMarkdown")
+        return content, None
+    if marker_count != 1:
+        raise NativeHostError("downloadedMarkdown requires exactly one detailed Markdown marker")
+
+    body, source, name = read_downloaded_markdown_content(downloaded_markdown)
+    replaced = content.replace(DETAILED_MARKDOWN_MARKER, body, 1)
+    if DETAILED_MARKDOWN_MARKER in replaced:
+        raise NativeHostError("detailed Markdown marker was not replaced")
+    return replaced, {
+        "name": name,
+        "sourcePath": str(source),
+        "downloadId": downloaded_markdown.get("downloadId"),
+        "characters": len(body),
+    }
+
+
 def note_relative_link_path(note_parent, target):
     rel_path = os.path.relpath(str(target), start=str(note_parent))
     return rel_path.replace(os.sep, "/").replace("\\", "/")
 
 
-def save_attachment_text(attachment_dir, vault_path, note_parent, name, content, source=""):
-    target = (attachment_dir / name).resolve()
+def save_attachment_to_target(target, vault_path, note_parent, content, source=""):
+    target = target.resolve()
     if not is_relative_to(target, vault_path):
         raise NativeHostError("resolved attachment path escapes vaultPath")
 
-    target = unique_path(target)
     target.write_text(content, encoding="utf-8")
     relative_path_from_vault = target.relative_to(vault_path).as_posix()
     saved = {
@@ -343,6 +461,132 @@ def save_attachment_text(attachment_dir, vault_path, note_parent, name, content,
     if source:
         saved["source"] = source
     return saved
+
+
+def save_attachment_text(attachment_dir, vault_path, note_parent, name, content, source=""):
+    target = (attachment_dir / name).resolve()
+    if not is_relative_to(target, vault_path):
+        raise NativeHostError("resolved attachment path escapes vaultPath")
+    return save_attachment_to_target(unique_path(target), vault_path, note_parent, content, source)
+
+
+def html_element_ids(content):
+    collector = HtmlIdCollector()
+    try:
+        collector.feed(str(content or ""))
+        collector.close()
+    except (TypeError, ValueError):
+        return set()
+    return collector.ids
+
+
+def filename_key(value):
+    return unicodedata.normalize("NFC", str(value or "")).casefold()
+
+
+def embedded_chapter_anchor_candidates(decoded_path, fragment=""):
+    candidates = []
+
+    def add(value):
+        value = str(value or "").strip()
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(unquote(fragment))
+    stem = PurePosixPath(str(decoded_path or "")).stem
+    add(stem)
+    prefix = re.match(r"^(\d{1,3})(?:[-_]|$)", stem)
+    if prefix:
+        number = prefix.group(1)
+        add(f"ch-{number}-title")
+        add(f"chapter-{number}-title")
+        add(f"ch-{number}")
+        add(f"chapter-{number}")
+    return candidates
+
+
+def build_embedded_anchor_targets(records):
+    targets = []
+    for record in records:
+        ids = html_element_ids(record.get("content"))
+        target = record.get("target")
+        if not ids or target is None:
+            continue
+        targets.append({
+            "name": record["name"],
+            "savedName": target.name,
+            "ids": ids,
+        })
+    return targets
+
+
+def resolve_embedded_html_anchor(decoded_path, fragment, current_name, anchor_targets):
+    current_key = filename_key(current_name)
+    for anchor in embedded_chapter_anchor_candidates(decoded_path, fragment):
+        matches = [target for target in anchor_targets if anchor in target["ids"]]
+        current_matches = [target for target in matches if filename_key(target["name"]) == current_key]
+        if len(current_matches) == 1:
+            return current_matches[0], anchor
+        if len(matches) == 1:
+            return matches[0], anchor
+    return None
+
+
+def rewrite_local_html_links(content, attachment_manifest, anchor_targets=None, current_name=""):
+    manifest = {filename_key(name): str(saved_name) for name, saved_name in attachment_manifest.items()}
+    anchor_targets = list(anchor_targets or [])
+    unresolved = []
+
+    def replace_href(match):
+        original = match.group(3)
+        href = html_unescape(original.strip())
+        if not href or href.startswith(("#", "/", "//")):
+            return match.group(0)
+
+        try:
+            parsed = urlsplit(href)
+        except ValueError:
+            return match.group(0)
+        if parsed.scheme or parsed.netloc:
+            return match.group(0)
+
+        decoded_path = unquote(parsed.path).replace("\\", "/")
+        if not re.search(r"\.html?$", decoded_path, re.I):
+            return match.group(0)
+        basename = PurePosixPath(decoded_path).name
+        saved_name = manifest.get(filename_key(basename))
+        if not saved_name:
+            embedded = resolve_embedded_html_anchor(
+                decoded_path,
+                parsed.fragment,
+                current_name,
+                anchor_targets,
+            )
+            if not embedded:
+                unresolved.append(href)
+                return match.group(0)
+
+            target, anchor = embedded
+            if filename_key(target["name"]) == filename_key(current_name):
+                flattened = ""
+            else:
+                flattened = "./" + quote(target["savedName"], safe="-._~()")
+            if parsed.query:
+                flattened += "?" + parsed.query
+            flattened += "#" + quote(anchor, safe="-._~")
+            escaped = html_escape(flattened, quote=False)
+            return f"{match.group(1)}{match.group(2)}{escaped}{match.group(2)}"
+
+        flattened = "./" + quote(saved_name, safe="-._~()")
+        if parsed.query:
+            flattened += "?" + parsed.query
+        if parsed.fragment:
+            flattened += "#" + parsed.fragment
+        escaped = html_escape(flattened, quote=False)
+        return f"{match.group(1)}{match.group(2)}{escaped}{match.group(2)}"
+
+    rewritten = ANCHOR_HREF_RE.sub(replace_href, str(content or ""))
+    return rewritten, list(dict.fromkeys(unresolved))
 
 
 def attachment_links(saved_attachments):
@@ -426,12 +670,9 @@ def save_attachments(message, vault_path, note_parent):
         raise NativeHostError(f"attachments must not contain more than {MAX_ATTACHMENTS} files")
 
     attachment_dir = resolve_html_save_dir(message.get("htmlSaveDir"), vault_path)
-    saved = []
     warnings = []
+    records = []
     total_bytes = 0
-
-    if attachments or downloaded_attachments:
-        attachment_dir.mkdir(parents=True, exist_ok=True)
 
     for index, asset in enumerate(attachments, start=1):
         content = validate_attachment_content(asset, index)
@@ -442,7 +683,7 @@ def save_attachments(message, vault_path, note_parent):
 
         name = sanitize_attachment_filename(asset.get("name"), f"attachment-{index}.html")
         source = str(asset.get("source") or "")
-        saved.append(save_attachment_text(attachment_dir, vault_path, note_parent, name, content, source))
+        records.append({"name": name, "content": content, "source": source})
 
     offset = len(attachments)
     for index, asset in enumerate(downloaded_attachments, start=1):
@@ -452,26 +693,118 @@ def save_attachments(message, vault_path, note_parent):
         if total_bytes > MAX_TOTAL_ATTACHMENT_BYTES:
             raise NativeHostError("total attachment content is too large")
 
-        saved.append(save_attachment_text(attachment_dir, vault_path, note_parent, name, content, "chrome-download"))
+        records.append({"name": name, "content": content, "source": "chrome-download"})
+
+    by_name = {}
+    ambiguous_names = set()
+    for record in records:
+        key = filename_key(record["name"])
+        digest = hashlib.sha256(record["content"].encode("utf-8")).hexdigest()
+        record["digest"] = digest
+        existing = by_name.get(key)
+        if existing is None:
+            by_name[key] = record
+        elif existing["digest"] == digest:
+            warnings.append(f"duplicate attachment source was ignored: {record['name']}")
+        else:
+            ambiguous_names.add(key)
+
+    for key in ambiguous_names:
+        record = by_name.pop(key, None)
+        display_name = record["name"] if record else key
+        warnings.append(f"conflicting attachment sources were excluded: {display_name}")
+
+    content_groups = {}
+    for record in by_name.values():
+        content_groups.setdefault(record["digest"], []).append(record)
+    rejected_names = set()
+    for group in content_groups.values():
+        names = list(dict.fromkeys(item["name"] for item in group))
+        if len(names) > 1:
+            rejected_names.update(filename_key(name) for name in names)
+            warnings.append("identical HTML content under different filenames was excluded: " + ", ".join(names))
+
+    safe_records = [record for key, record in by_name.items() if key not in rejected_names]
+    saved = []
+    attachment_manifest = {}
+    reserved = set()
+    if safe_records:
+        attachment_dir.mkdir(parents=True, exist_ok=True)
+        for record in safe_records:
+            requested = (attachment_dir / record["name"]).resolve()
+            if not is_relative_to(requested, vault_path):
+                raise NativeHostError("resolved attachment path escapes vaultPath")
+            target = unique_path_with_reserved(requested, reserved)
+            reserved.add(target)
+            record["target"] = target
+            attachment_manifest[record["name"]] = target.name
+
+        anchor_targets = build_embedded_anchor_targets(safe_records)
+        for record in safe_records:
+            rewritten, unresolved = rewrite_local_html_links(
+                record["content"],
+                attachment_manifest,
+                anchor_targets,
+                record["name"],
+            )
+            if unresolved:
+                warnings.append(
+                    f"unresolved local HTML links in {record['name']}: " + ", ".join(unresolved[:10])
+                )
+            saved.append(save_attachment_to_target(
+                record["target"],
+                vault_path,
+                note_parent,
+                rewritten,
+                record["source"]
+            ))
 
     attachment_names = normalize_attachment_names(message.get("attachmentNames"))
-    saved_names = {item["name"] for item in saved}
-    missing_named = [name for name in dict.fromkeys(attachment_names) if name not in saved_names]
+    known_names = {filename_key(item["name"]) for item in saved} | {
+        filename_key(record["name"]) for record in safe_records
+    }
+    missing_named = [
+        name for name in dict.fromkeys(attachment_names)
+        if filename_key(name) not in known_names
+    ]
     if missing_named:
         warnings.append("attachmentNames without attachment content were not saved: " + ", ".join(missing_named[:5]))
 
     return saved, warnings
 
 
-def maybe_open_saved_note(message, vault_path, note_path, warnings):
-    rel_open = note_path.relative_to(vault_path).as_posix()
+def saved_note_open_uri(message, vault_path, note_path):
     vault_name = str(message.get("vaultName") or "").strip()
     if vault_name:
-        uri = f"obsidian://open?vault={quote(vault_name, safe='')}&file={quote(rel_open, safe='')}"
-    else:
-        uri = f"obsidian://open?path={quote(str(note_path), safe='')}"
+        rel_open = note_path.relative_to(vault_path).as_posix()
+        return f"obsidian://open?vault={quote(vault_name, safe='')}&file={quote(rel_open, safe='')}"
+    return f"obsidian://open?path={quote(str(note_path.resolve()), safe='')}"
+
+
+def maybe_open_saved_note(message, vault_path, note_path, warnings):
+    uri = saved_note_open_uri(message, vault_path, note_path)
 
     try:
+        if not note_path.is_file():
+            raise NativeHostError("saved note file was not visible before opening Obsidian")
+        if sys.platform == "darwin":
+            # LaunchServices receives the exact file we just wrote, avoiding
+            # Obsidian's URI/index lookup for long Unicode filenames.
+            time.sleep(0.2)
+            subprocess.run(
+                ["open", "-a", "Obsidian", str(note_path)],
+                shell=False,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+        vault_name = str(message.get("vaultName") or "").strip()
+        if vault_name:
+            # If another vault is active, let Obsidian switch and index the
+            # target vault before resolving the new note's relative path.
+            open_obsidian_uri(f"obsidian://open?vault={quote(vault_name, safe='')}")
+        time.sleep(NOTE_OPEN_DELAY_SECONDS)
         open_obsidian_uri(uri)
     except Exception as exc:
         warnings.append(f"saved note but could not open Obsidian URI: {exc}")
@@ -494,15 +827,23 @@ def save_note(message):
         message.get("htmlCodeBlockReplacementText")
     )
     content = replace_attachment_marker(content, links)
+    content, detailed_markdown = replace_downloaded_markdown_marker(
+        content,
+        message.get("downloadedMarkdown"),
+    )
 
     note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text(content, encoding="utf-8")
+    with note_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
     maybe_open_saved_note(message, vault_path, note_path, warnings)
 
     return {
         "ok": True,
         "notePath": str(note_path),
         "attachments": saved_attachments,
+        "detailedMarkdown": detailed_markdown,
         "warnings": warnings,
     }
 
@@ -538,6 +879,7 @@ def assert_raises(fn, expected):
 
 
 def self_test():
+    assert filename_key("전체.html") == filename_key(unicodedata.normalize("NFD", "전체.html"))
     assert_raises(lambda: validate_note_relative_path("../escape.md"), "path traversal")
     assert_raises(lambda: validate_note_relative_path("safe/../../escape.md"), "path traversal")
     assert_raises(lambda: validate_note_relative_path("safe\\..\\escape.md"), "path traversal")
@@ -592,11 +934,186 @@ def self_test():
         assert saved_root[0]["relativePathFromVault"] == "Attachments/root-file.html"
         assert saved_root[0]["linkPathFromNote"] == "../Attachments/root-file.html"
 
+        flat_saved, flat_warnings = save_attachments({
+            "htmlSaveDir": "ChatGPT_Test/FlatAttachments",
+            "attachments": [
+                {
+                    "name": "complete.html",
+                    "content": "<!doctype html><html><head><title>Complete</title></head><body>"
+                               "<a href=\"chapters/index.html\">Index</a>"
+                               "<a href=\"chapters/00-overview.html#start\">Overview</a>"
+                               "<a href=\"https://example.com/external.html\">External</a>"
+                               "<a href=\"#inside\">Inside</a>"
+                               "<img src=\"chapters/00-overview.html\">"
+                               "<a href=\"chapters/missing.html\">Missing</a>"
+                               "</body></html>",
+                },
+                {
+                    "name": "index.html",
+                    "content": "<!doctype html><html><head><title>Index</title></head><body>"
+                               "<a href=\"./00-overview.html\">Overview</a>"
+                               "<a href=\"../complete.html\">Complete</a>"
+                               "</body></html>",
+                },
+                {
+                    "name": "00-overview.html",
+                    "content": "<!doctype html><html><head><title>Overview</title></head><body>"
+                               "<a href=\"../index.html\">Index</a>"
+                               "<p>Unique overview content</p>"
+                               "</body></html>",
+                },
+            ],
+        }, vault.resolve(), chatgpt_dir.resolve())
+        assert len(flat_saved) == 3
+        assert any("unresolved local HTML links" in warning for warning in flat_warnings)
+        flat_dir = chatgpt_dir / "FlatAttachments"
+        complete_text = (flat_dir / "complete.html").read_text(encoding="utf-8")
+        assert 'href="./index.html"' in complete_text
+        assert 'href="./00-overview.html#start"' in complete_text
+        assert 'href="https://example.com/external.html"' in complete_text
+        assert 'href="#inside"' in complete_text
+        assert 'src="chapters/00-overview.html"' in complete_text
+        assert 'href="chapters/missing.html"' in complete_text
+        index_text = (flat_dir / "index.html").read_text(encoding="utf-8")
+        assert 'href="./00-overview.html"' in index_text
+        assert 'href="./complete.html"' in index_text
+        overview_text = (flat_dir / "00-overview.html").read_text(encoding="utf-8")
+        assert 'href="./index.html"' in overview_text
+
+        embedded_saved, embedded_warnings = save_attachments({
+            "htmlSaveDir": "ChatGPT_Test/EmbeddedChapterAttachments",
+            "attachments": [
+                {
+                    "name": "complete.html",
+                    "content": "<!doctype html><html><head><title>Complete</title></head><body>"
+                               "<nav><a href=\"chapters/00-overview.html\">Overview</a></nav>"
+                               "<h2 id=\"ch-00-title\">Embedded overview</h2>"
+                               "</body></html>",
+                },
+                {
+                    "name": "index.html",
+                    "content": "<!doctype html><html><head><title>Index</title></head><body>"
+                               "<a href=\"chapters/00-overview.html\">Overview</a>"
+                               "</body></html>",
+                },
+            ],
+        }, vault.resolve(), chatgpt_dir.resolve())
+        assert len(embedded_saved) == 2
+        assert not embedded_warnings
+        embedded_dir = chatgpt_dir / "EmbeddedChapterAttachments"
+        embedded_complete = (embedded_dir / "complete.html").read_text(encoding="utf-8")
+        assert 'href="#ch-00-title"' in embedded_complete
+        embedded_index = (embedded_dir / "index.html").read_text(encoding="utf-8")
+        assert 'href="./complete.html#ch-00-title"' in embedded_index
+
+        duplicate_html = "<!doctype html><html><head><title>Duplicate</title></head><body>same</body></html>"
+        duplicate_saved, duplicate_warnings = save_attachments({
+            "htmlSaveDir": "ChatGPT_Test/DuplicateAttachments",
+            "attachments": [
+                {"name": "first.html", "content": duplicate_html},
+                {"name": "second.html", "content": duplicate_html},
+            ],
+        }, vault.resolve(), chatgpt_dir.resolve())
+        assert duplicate_saved == []
+        assert any("identical HTML content under different filenames" in warning for warning in duplicate_warnings)
+
+        conflict_saved, conflict_warnings = save_attachments({
+            "htmlSaveDir": "ChatGPT_Test/ConflictAttachments",
+            "attachments": [
+                {"name": "same.html", "content": "<!doctype html><html><body>one</body></html>"},
+                {"name": "same.html", "content": "<!doctype html><html><body>two</body></html>"},
+            ],
+        }, vault.resolve(), chatgpt_dir.resolve())
+        assert conflict_saved == []
+        assert any("conflicting attachment sources" in warning for warning in conflict_warnings)
+
         bad_download = base / "bad.txt"
         bad_download.write_text("not html", encoding="utf-8")
         assert_raises(lambda: save_attachments({
             "downloadedAttachments": [{"sourcePath": str(bad_download), "downloadId": 124}]
         }, vault.resolve(), chatgpt_dir.resolve()), ".html or .htm")
+
+        detailed_download = base / "code-for-all-detailed-summary-ko.md"
+        detailed_body = "## 연구 설계\n\n" + "보존해야 하는 상세 한국어 요약과 표 데이터입니다.\n" * 22000
+        assert len(detailed_body) > 400_000
+        detailed_download.write_text(
+            f"# {DETAILED_MARKDOWN_HEADING}\n\n{detailed_body}\n{ATTACHMENT_MARKER}\n",
+            encoding="utf-8",
+        )
+        detailed_note = "\n".join([
+            "---",
+            'title: "Detailed download"',
+            "---",
+            "",
+            "# 질문",
+            "",
+            "질문",
+            "",
+            f"# {DETAILED_MARKDOWN_HEADING}",
+            "",
+            DETAILED_MARKDOWN_MARKER,
+        ])
+        detailed_replaced, detailed_metadata = replace_downloaded_markdown_marker(
+            detailed_note,
+            {
+                "name": detailed_download.name,
+                "sourcePath": str(detailed_download),
+                "downloadId": 741,
+                "startTime": "2026-08-25T05:00:00.000Z",
+                "endTime": "2026-08-25T05:00:01.000Z",
+            },
+        )
+        assert detailed_replaced.count(f"# {DETAILED_MARKDOWN_HEADING}") == 1
+        assert DETAILED_MARKDOWN_MARKER not in detailed_replaced
+        assert ATTACHMENT_MARKER not in detailed_replaced
+        assert detailed_body.strip() in detailed_replaced
+        assert detailed_metadata["downloadId"] == 741
+        assert detailed_metadata["characters"] > 400_000
+        assert_raises(
+            lambda: replace_downloaded_markdown_marker(
+                detailed_note + "\n" + DETAILED_MARKDOWN_MARKER,
+                {
+                    "name": detailed_download.name,
+                    "sourcePath": str(detailed_download),
+                    "downloadId": 742,
+                },
+            ),
+            "exactly one detailed Markdown marker",
+        )
+        assert_raises(
+            lambda: replace_downloaded_markdown_marker(detailed_note, None),
+            "marker requires downloadedMarkdown",
+        )
+
+        wrong_markdown = base / "not-markdown.txt"
+        wrong_markdown.write_text("plain text", encoding="utf-8")
+        assert_raises(
+            lambda: read_downloaded_markdown_content({
+                "name": "not-markdown.md",
+                "sourcePath": str(wrong_markdown),
+                "downloadId": 743,
+            }),
+            "must be a .md file",
+        )
+
+        oversized_markdown = base / "oversized.md"
+        oversized_markdown.write_text("x" * (MAX_GENERATED_MARKDOWN_CHARS + 1), encoding="utf-8")
+        assert_raises(
+            lambda: read_downloaded_markdown_content({
+                "name": oversized_markdown.name,
+                "sourcePath": str(oversized_markdown),
+                "downloadId": 744,
+            }),
+            "content is too large",
+        )
+
+        open_uri = saved_note_open_uri(
+            {"vaultName": "Test Vault"},
+            vault.resolve(),
+            (chatgpt_dir / "새 노트.md").resolve(),
+        )
+        assert open_uri.startswith("obsidian://open?vault=Test%20Vault&file=")
+        assert "ChatGPT_Test%2F" in open_uri
 
     validate_obsidian_uri("obsidian://new?vault=Vault&file=test.md")
     assert_raises(lambda: validate_obsidian_uri("http://example.com"), "obsidian://")
@@ -632,6 +1149,27 @@ def self_test():
     assert ATTACHMENT_MARKER not in learning_replaced
     assert "## HTML Learning Material\n\n- [lesson.html](Attachments/lesson.html)" in learning_replaced
     assert "## Original Question" in learning_replaced
+
+    current_learning_content = "\n".join([
+        "---",
+        'title: "Current HTML learning"',
+        "---",
+        "",
+        "# HTML 학습자료",
+        "",
+        ATTACHMENT_MARKER,
+        "",
+        "# 질문",
+        "",
+        "질문",
+    ])
+    current_learning_replaced = replace_attachment_marker(
+        current_learning_content,
+        "- [lesson.html](Attachments/lesson.html)"
+    )
+    assert ATTACHMENT_MARKER not in current_learning_replaced
+    assert "# HTML 학습자료\n\n- [lesson.html](Attachments/lesson.html)" in current_learning_replaced
+    assert "# 질문" in current_learning_replaced
 
     plain_filenames = "The literal filenames options 2.html and example 1.html stay plain."
     plain_removed = replace_attachment_marker(plain_filenames, "")

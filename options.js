@@ -1,7 +1,7 @@
 // options.js
 const $ = (id) => document.getElementById(id);
-const BUILD_VERSION = "1.5.30";
-const CONTENT_SCRIPT_VERSION = "1.5.30";
+const BUILD_VERSION = "1.5.40";
+const CONTENT_SCRIPT_VERSION = "1.5.40";
 const SUPPORTED_LANGUAGES = ["en", "ko"];
 const DEFAULT_LANGUAGE = "en";
 const I18N = {
@@ -21,6 +21,14 @@ const I18N = {
     htmlSaveDirLabel: "HTML file save folder",
     htmlSaveDirPlaceholder: "Leave empty for Attachments",
     htmlSaveDirHint: "Relative paths are resolved inside the vault. Absolute paths are allowed only inside vaultPath. Default is Attachments inside the vault.",
+    resolvedPathsHeading: "Resolved save paths",
+    resolvedPathPreview: "Current form preview",
+    resolvedPathStored: "Stored values verified",
+    resolvedNotePathLabel: "Markdown note folder",
+    resolvedHtmlPathLabel: "HTML attachment folder",
+    pathMismatchWarning: "Warning: the note folder root “{noteRoot}” differs from the HTML folder root “{htmlRoot}”. Saving is allowed, but verify that this split is intentional.",
+    resetHtmlFolderButton: "Set HTML folder to {path}",
+    resetHtmlFolderPreparedStatus: "HTML folder field updated. Click Save to persist it.",
     prefixDateLabel: "Add date prefix (YYYY-MM-DD) to file names",
     includeTimeLabel: "Also add time (HH-mm-ss) after the date",
     includeTimeHint: "This helps avoid duplicate file names when saving the same title multiple times.",
@@ -33,7 +41,10 @@ const I18N = {
     usePreviousQaForHtmlLabel: "Use the previous Q&A when saving an HTML learning note",
     usePreviousQaForHtmlHint: "Default off. When enabled, HTML attachment notes use the Q&A immediately before the HTML-generation request.",
     saveButton: "Save",
-    savedStatus: "Saved ✓"
+    savingStatus: "Saving…",
+    savedStatus: "Saved and storage verified ✓",
+    saveFailedStatus: "Save failed: {error}",
+    notConfiguredPath: "(vault path not configured)"
   },
   ko: {
     pageTitle: "GPT → Obsidian Saver 설정",
@@ -51,6 +62,14 @@ const I18N = {
     htmlSaveDirLabel: "HTML 파일 저장 폴더",
     htmlSaveDirPlaceholder: "비워두면 Attachments",
     htmlSaveDirHint: "상대경로는 vault 내부 기준입니다. 절대경로는 vaultPath 안쪽일 때만 허용됩니다. 비워두면 vault의 Attachments 폴더에 저장합니다.",
+    resolvedPathsHeading: "실제 저장 경로",
+    resolvedPathPreview: "현재 입력값 미리보기",
+    resolvedPathStored: "저장소 값 재확인 완료",
+    resolvedNotePathLabel: "Markdown 노트 폴더",
+    resolvedHtmlPathLabel: "HTML 첨부파일 폴더",
+    pathMismatchWarning: "주의: 노트 폴더의 첫 경로 “{noteRoot}”와 HTML 폴더의 첫 경로 “{htmlRoot}”가 다릅니다. 저장은 가능하지만 의도한 분리인지 확인하세요.",
+    resetHtmlFolderButton: "HTML 폴더를 {path}(으)로 설정",
+    resetHtmlFolderPreparedStatus: "HTML 폴더 입력값을 바꿨습니다. 저장 버튼을 눌러 반영하세요.",
     prefixDateLabel: "파일명 앞에 날짜(YYYY-MM-DD) 붙이기",
     includeTimeLabel: "날짜 뒤에 시간(HH-mm-ss)도 붙이기",
     includeTimeHint: "같은 제목을 여러 번 저장해도 중복 없이 저장됩니다.",
@@ -63,7 +82,10 @@ const I18N = {
     usePreviousQaForHtmlLabel: "HTML 학습자료 저장 시 이전 질문·답변 사용",
     usePreviousQaForHtmlHint: "기본값은 꺼짐입니다. 켜면 HTML 첨부 노트가 HTML 생성 요청 직전의 질문·답변을 사용합니다.",
     saveButton: "저장",
-    savedStatus: "저장됨 ✓"
+    savingStatus: "저장 중…",
+    savedStatus: "저장 후 실제 저장값 확인 완료 ✓",
+    saveFailedStatus: "저장 실패: {error}",
+    notConfiguredPath: "(vault 경로가 설정되지 않음)"
   }
 };
 
@@ -78,6 +100,10 @@ function normalizeLanguage(value) {
 
 function t(key) {
   return I18N[currentLanguage]?.[key] || I18N[DEFAULT_LANGUAGE][key] || key;
+}
+
+function formatTemplate(template, values = {}) {
+  return String(template || "").replace(/\{([A-Za-z0-9_]+)\}/g, (_match, key) => String(values[key] ?? ""));
 }
 
 function renderI18n(language = currentLanguage) {
@@ -107,88 +133,351 @@ function renderBuildDiagnostic(saveHtmlCodeBlocks = false, usePreviousQaForHtml 
   });
 }
 
-function migrateHtmlSaveDir(syncState, localState, callback) {
+function normalizeDisplayPath(value) {
+  const raw = String(value || "").trim().replace(/\\/g, "/");
+  if (!raw) return "";
+  const unc = raw.startsWith("//");
+  const normalized = raw.replace(/\/{2,}/g, "/");
+  return unc ? `/${normalized}` : normalized;
+}
+
+function trimTrailingPathSeparators(value) {
+  const normalized = normalizeDisplayPath(value);
+  if (normalized === "/" || /^[A-Za-z]:\/$/.test(normalized)) return normalized;
+  return normalized.replace(/\/+$/g, "");
+}
+
+function normalizeRelativePath(value) {
+  return normalizeDisplayPath(value).replace(/^\/+|\/+$/g, "");
+}
+
+function isAbsoluteDisplayPath(value) {
+  const normalized = normalizeDisplayPath(value);
+  return normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized);
+}
+
+function joinVaultDisplayPath(vaultPath, childPath) {
+  const vault = trimTrailingPathSeparators(vaultPath);
+  const child = normalizeDisplayPath(childPath);
+  if (child && isAbsoluteDisplayPath(child)) return trimTrailingPathSeparators(child);
+  const relative = normalizeRelativePath(child);
+  if (!vault) return relative;
+  if (!relative) return vault;
+  return `${vault}/${relative}`;
+}
+
+function defaultHtmlSaveDir(folderPath) {
+  const folder = normalizeRelativePath(folderPath);
+  return folder ? `${folder}/Attachments` : "Attachments";
+}
+
+function relativePathForRootComparison(pathValue, vaultPath) {
+  const path = normalizeDisplayPath(pathValue);
+  if (!path) return "";
+  if (!isAbsoluteDisplayPath(path)) return normalizeRelativePath(path);
+
+  const vault = trimTrailingPathSeparators(vaultPath);
+  if (!vault) return null;
+  const insensitive = /^[A-Za-z]:\//.test(vault);
+  const comparablePath = insensitive ? path.toLowerCase() : path;
+  const comparableVault = insensitive ? vault.toLowerCase() : vault;
+  if (comparablePath === comparableVault) return "";
+  if (!comparablePath.startsWith(`${comparableVault}/`)) return null;
+  return normalizeRelativePath(path.slice(vault.length + 1));
+}
+
+function firstPathSegment(value) {
+  return normalizeRelativePath(value).split("/").filter(Boolean)[0] || "";
+}
+
+function analyzePathSettings({ vaultPath = "", folderPath = "", htmlSaveDir = "" } = {}) {
+  const normalizedVaultPath = trimTrailingPathSeparators(vaultPath);
+  const noteRelativePath = normalizeRelativePath(folderPath);
+  const effectiveHtmlPath = normalizeDisplayPath(htmlSaveDir) || "Attachments";
+  const htmlRelativeForComparison = relativePathForRootComparison(effectiveHtmlPath, normalizedVaultPath);
+  const noteRoot = firstPathSegment(noteRelativePath);
+  const htmlRoot = htmlRelativeForComparison === null ? "" : firstPathSegment(htmlRelativeForComparison);
+  const rootsDiffer = !!noteRoot && !!htmlRoot && noteRoot.toLocaleLowerCase() !== htmlRoot.toLocaleLowerCase();
+
+  return {
+    noteFinalPath: joinVaultDisplayPath(normalizedVaultPath, noteRelativePath),
+    htmlFinalPath: joinVaultDisplayPath(normalizedVaultPath, effectiveHtmlPath),
+    noteRoot,
+    htmlRoot,
+    rootsDiffer,
+    resetHtmlSaveDir: defaultHtmlSaveDir(noteRelativePath)
+  };
+}
+
+function currentFormSettings() {
+  return {
+    uiLanguage: normalizeLanguage($("uiLanguage")?.value),
+    vaultName: $("vaultName")?.value.trim() || "",
+    folderPath: $("folderPath")?.value.trim() || "",
+    vaultPath: $("vaultPath")?.value.trim() || "",
+    htmlSaveDir: $("htmlSaveDir")?.value.trim() || "",
+    prefixDate: !!$("prefixDate")?.checked,
+    includeTime: !!$("includeTime")?.checked,
+    keepQM: !!$("keepQM")?.checked,
+    bodyTitle: !!$("bodyTitle")?.checked,
+    saveHtmlCodeBlocks: !!$("saveHtmlCodeBlocks")?.checked,
+    usePreviousQaForHtml: !!$("usePreviousQaForHtml")?.checked
+  };
+}
+
+function renderPathDiagnostic(values = currentFormSettings(), { stored = false } = {}) {
+  const analysis = analyzePathSettings(values);
+  const notePathNode = $("resolvedNotePath");
+  const htmlPathNode = $("resolvedHtmlPath");
+  const sourceNode = $("pathDiagnosticSource");
+  const warningNode = $("pathMismatchWarning");
+  const resetButton = $("resetHtmlDirBtn");
+
+  if (notePathNode) notePathNode.textContent = analysis.noteFinalPath || t("notConfiguredPath");
+  if (htmlPathNode) htmlPathNode.textContent = analysis.htmlFinalPath || t("notConfiguredPath");
+  if (sourceNode) sourceNode.textContent = stored ? t("resolvedPathStored") : t("resolvedPathPreview");
+  if (warningNode) {
+    warningNode.hidden = !analysis.rootsDiffer;
+    warningNode.textContent = analysis.rootsDiffer
+      ? formatTemplate(t("pathMismatchWarning"), { noteRoot: analysis.noteRoot, htmlRoot: analysis.htmlRoot })
+      : "";
+  }
+  if (resetButton) {
+    resetButton.textContent = formatTemplate(t("resetHtmlFolderButton"), { path: analysis.resetHtmlSaveDir });
+    resetButton.dataset.targetPath = analysis.resetHtmlSaveDir;
+  }
+  return analysis;
+}
+
+function storageGet(area, keys) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.storage[area].get(keys, (state) => {
+        const error = chrome.runtime?.lastError;
+        if (error) {
+          reject(new Error(error.message || String(error)));
+          return;
+        }
+        resolve(state || {});
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function storageSet(area, values) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.storage[area].set(values, () => {
+        const error = chrome.runtime?.lastError;
+        if (error) {
+          reject(new Error(error.message || String(error)));
+          return;
+        }
+        resolve();
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function storageRemove(area, keys) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.storage[area].remove(keys, () => {
+        const error = chrome.runtime?.lastError;
+        if (error) {
+          reject(new Error(error.message || String(error)));
+          return;
+        }
+        resolve();
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+async function migrateHtmlSaveDir(syncState, localState) {
   const legacyHtmlSaveDir = syncState.htmlSaveDir || "";
   const hasLocalValue = !!localState.htmlSaveDir;
   const alreadyMigrated = !!localState.htmlSaveDirMigratedFromSync;
 
   if (!hasLocalValue && legacyHtmlSaveDir && !alreadyMigrated) {
-    chrome.storage.local.set({
+    await storageSet("local", {
       htmlSaveDir: legacyHtmlSaveDir,
       htmlSaveDirMigratedFromSync: true
-    }, () => {
-      localState.htmlSaveDir = legacyHtmlSaveDir;
-      localState.htmlSaveDirMigratedFromSync = true;
-      callback();
     });
-    return;
+    localState.htmlSaveDir = legacyHtmlSaveDir;
+    localState.htmlSaveDirMigratedFromSync = true;
   }
-
-  callback();
 }
 
-function load() {
-  chrome.storage.sync.get(LEGACY_SYNC_KEYS, (syncState) => {
-    chrome.storage.local.get(LOCAL_KEYS, (localState) => {
-      migrateHtmlSaveDir(syncState, localState, () => {
-        currentLanguage = normalizeLanguage(syncState.uiLanguage);
-        $("uiLanguage").value = currentLanguage;
-        renderI18n(currentLanguage);
-        $("vaultName").value = syncState.vaultName || "";
-        $("folderPath").value = syncState.folderPath || "ChatGPT";
-        $("vaultPath").value = localState.vaultPath || "";
-        $("htmlSaveDir").value = localState.htmlSaveDir || "";
-        $("prefixDate").checked = (syncState.prefixDate === undefined) ? true : !!syncState.prefixDate;
-        $("includeTime").checked = !!syncState.includeTime;
-        $("keepQM").checked = !!syncState.keepQM;
-        $("bodyTitle").checked = (syncState.bodyTitle === undefined) ? (navigator.userAgent.includes("Windows")) : !!syncState.bodyTitle;
-        $("saveHtmlCodeBlocks").checked = !!syncState.saveHtmlCodeBlocks;
-        $("usePreviousQaForHtml").checked = !!syncState.usePreviousQaForHtml;
-        renderBuildDiagnostic(!!syncState.saveHtmlCodeBlocks, !!syncState.usePreviousQaForHtml);
-      });
-    });
-  });
+async function readStoredSettings() {
+  const [syncState, localState] = await Promise.all([
+    storageGet("sync", LEGACY_SYNC_KEYS),
+    storageGet("local", LOCAL_KEYS)
+  ]);
+  await migrateHtmlSaveDir(syncState, localState);
+  return { syncState, localState };
 }
 
-function save() {
-  const uiLanguage = normalizeLanguage($("uiLanguage").value);
-  const vaultName = $("vaultName").value.trim();
-  const folderPath = $("folderPath").value.trim();
-  const vaultPath = $("vaultPath").value.trim();
-  const htmlSaveDir = $("htmlSaveDir").value.trim();
-  const prefixDate = $("prefixDate").checked;
-  const includeTime = $("includeTime").checked;
-  const keepQM = $("keepQM").checked;
-  const bodyTitle = $("bodyTitle").checked;
-  const saveHtmlCodeBlocks = $("saveHtmlCodeBlocks").checked;
-  const usePreviousQaForHtml = $("usePreviousQaForHtml").checked;
+function applyStoredSettings(syncState, localState) {
+  currentLanguage = normalizeLanguage(syncState.uiLanguage);
+  $("uiLanguage").value = currentLanguage;
+  $("vaultName").value = syncState.vaultName || "";
+  $("folderPath").value = syncState.folderPath === undefined ? "ChatGPT" : syncState.folderPath;
+  $("vaultPath").value = localState.vaultPath || "";
+  $("htmlSaveDir").value = localState.htmlSaveDir || "";
+  $("prefixDate").checked = (syncState.prefixDate === undefined) ? true : !!syncState.prefixDate;
+  $("includeTime").checked = !!syncState.includeTime;
+  $("keepQM").checked = !!syncState.keepQM;
+  $("bodyTitle").checked = (syncState.bodyTitle === undefined) ? navigator.userAgent.includes("Windows") : !!syncState.bodyTitle;
+  $("saveHtmlCodeBlocks").checked = !!syncState.saveHtmlCodeBlocks;
+  $("usePreviousQaForHtml").checked = !!syncState.usePreviousQaForHtml;
+}
 
-  let pending = 2;
-  const done = () => {
-    pending -= 1;
-    if (pending === 0) {
-      currentLanguage = uiLanguage;
-      renderI18n(currentLanguage);
-      renderBuildDiagnostic(saveHtmlCodeBlocks, usePreviousQaForHtml);
-      $("status").textContent = t("savedStatus");
-      setTimeout(()=> $("status").textContent = "", 1500);
-    }
+function storedSettingsAsValues(syncState, localState) {
+  return {
+    ...syncState,
+    vaultPath: localState.vaultPath || "",
+    htmlSaveDir: localState.htmlSaveDir || ""
   };
+}
 
-  chrome.storage.sync.set({ uiLanguage, vaultName, folderPath, prefixDate, includeTime, keepQM, bodyTitle, saveHtmlCodeBlocks, usePreviousQaForHtml }, done);
-  chrome.storage.local.set({ vaultPath, htmlSaveDir, htmlSaveDirMigratedFromSync: true }, done);
-  chrome.storage.sync.remove("htmlSaveDir", () => {
-    // Best-effort cleanup of the legacy machine-specific sync value.
+function setStatus(message, clearAfterMs = 0) {
+  const node = $("status");
+  if (!node) return;
+  node.textContent = message;
+  if (clearAfterMs > 0) {
+    setTimeout(() => {
+      if (node.textContent === message) node.textContent = "";
+    }, clearAfterMs);
+  }
+}
+
+async function load() {
+  try {
+    const { syncState, localState } = await readStoredSettings();
+    applyStoredSettings(syncState, localState);
+    renderI18n(currentLanguage);
+    renderBuildDiagnostic(!!syncState.saveHtmlCodeBlocks, !!syncState.usePreviousQaForHtml);
+    renderPathDiagnostic(storedSettingsAsValues(syncState, localState), { stored: true });
+  } catch (error) {
+    setStatus(formatTemplate(t("saveFailedStatus"), { error: error?.message || String(error) }));
+  }
+}
+
+function assertStorageMatches(expected, syncState, localState) {
+  const comparisons = [
+    ["uiLanguage", expected.uiLanguage, normalizeLanguage(syncState.uiLanguage)],
+    ["vaultName", expected.vaultName, syncState.vaultName || ""],
+    ["folderPath", expected.folderPath, syncState.folderPath || ""],
+    ["vaultPath", expected.vaultPath, localState.vaultPath || ""],
+    ["htmlSaveDir", expected.htmlSaveDir, localState.htmlSaveDir || ""],
+    ["prefixDate", expected.prefixDate, !!syncState.prefixDate],
+    ["includeTime", expected.includeTime, !!syncState.includeTime],
+    ["keepQM", expected.keepQM, !!syncState.keepQM],
+    ["bodyTitle", expected.bodyTitle, !!syncState.bodyTitle],
+    ["saveHtmlCodeBlocks", expected.saveHtmlCodeBlocks, !!syncState.saveHtmlCodeBlocks],
+    ["usePreviousQaForHtml", expected.usePreviousQaForHtml, !!syncState.usePreviousQaForHtml]
+  ];
+  const mismatch = comparisons.find(([_key, expectedValue, actualValue]) => expectedValue !== actualValue);
+  if (mismatch) {
+    throw new Error(`storage verification mismatch for ${mismatch[0]}`);
+  }
+}
+
+async function save() {
+  const values = currentFormSettings();
+  const saveButton = $("saveBtn");
+  if (saveButton) saveButton.disabled = true;
+  setStatus(t("savingStatus"));
+
+  try {
+    await Promise.all([
+      storageSet("sync", {
+        uiLanguage: values.uiLanguage,
+        vaultName: values.vaultName,
+        folderPath: values.folderPath,
+        prefixDate: values.prefixDate,
+        includeTime: values.includeTime,
+        keepQM: values.keepQM,
+        bodyTitle: values.bodyTitle,
+        saveHtmlCodeBlocks: values.saveHtmlCodeBlocks,
+        usePreviousQaForHtml: values.usePreviousQaForHtml
+      }),
+      storageSet("local", {
+        vaultPath: values.vaultPath,
+        htmlSaveDir: values.htmlSaveDir,
+        htmlSaveDirMigratedFromSync: true
+      })
+    ]);
+    await storageRemove("sync", "htmlSaveDir");
+
+    const { syncState, localState } = await readStoredSettings();
+    assertStorageMatches(values, syncState, localState);
+    applyStoredSettings(syncState, localState);
+    renderI18n(currentLanguage);
+    renderBuildDiagnostic(!!syncState.saveHtmlCodeBlocks, !!syncState.usePreviousQaForHtml);
+    renderPathDiagnostic(storedSettingsAsValues(syncState, localState), { stored: true });
+    setStatus(t("savedStatus"), 2500);
+  } catch (error) {
+    setStatus(formatTemplate(t("saveFailedStatus"), { error: error?.message || String(error) }));
+    throw error;
+  } finally {
+    if (saveButton) saveButton.disabled = false;
+  }
+}
+
+function resetHtmlFolderInput() {
+  const analysis = analyzePathSettings(currentFormSettings());
+  $("htmlSaveDir").value = analysis.resetHtmlSaveDir;
+  renderPathDiagnostic(currentFormSettings(), { stored: false });
+  setStatus(t("resetHtmlFolderPreparedStatus"));
+  try { $("htmlSaveDir").focus(); } catch {}
+}
+
+function handleAsyncAction(action) {
+  Promise.resolve(action()).catch((error) => {
+    console.warn("GPT → Obsidian options action failed.", error);
   });
+}
+
+if (globalThis.__GPT_OBSIDIAN_ENABLE_TEST_HOOKS__) {
+  globalThis.__GPT_OBSIDIAN_OPTIONS_TEST_HOOKS__ = {
+    BUILD_VERSION,
+    CONTENT_SCRIPT_VERSION,
+    normalizeDisplayPath,
+    joinVaultDisplayPath,
+    defaultHtmlSaveDir,
+    analyzePathSettings,
+    readStoredSettings,
+    renderPathDiagnostic,
+    currentFormSettings,
+    load,
+    save,
+    resetHtmlFolderInput
+  };
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   renderI18n(DEFAULT_LANGUAGE);
   renderBuildDiagnostic(false, false);
-  load();
-  $("uiLanguage").addEventListener("change", () => renderI18n($("uiLanguage").value));
+  renderPathDiagnostic(currentFormSettings(), { stored: false });
+  handleAsyncAction(load);
+  $("uiLanguage").addEventListener("change", () => {
+    renderI18n($("uiLanguage").value);
+    renderPathDiagnostic(currentFormSettings(), { stored: false });
+  });
   const renderCurrentDiagnostic = () => renderBuildDiagnostic($("saveHtmlCodeBlocks").checked, $("usePreviousQaForHtml").checked);
   $("saveHtmlCodeBlocks").addEventListener("change", renderCurrentDiagnostic);
   $("usePreviousQaForHtml").addEventListener("change", renderCurrentDiagnostic);
-  $("saveBtn").addEventListener("click", save);
+  ["vaultPath", "folderPath", "htmlSaveDir"].forEach((id) => {
+    $(id).addEventListener("input", () => renderPathDiagnostic(currentFormSettings(), { stored: false }));
+  });
+  $("resetHtmlDirBtn").addEventListener("click", resetHtmlFolderInput);
+  $("saveBtn").addEventListener("click", () => handleAsyncAction(save));
 });
