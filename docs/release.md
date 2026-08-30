@@ -2,6 +2,8 @@
 
 This document describes the GitHub-only release process. Do not add Chrome Web Store submission steps.
 
+Commands containing v1.5.40 below are historical examples from the latest committed release. Substitute the approved candidate version for a future release; do not assume the current development version has already shipped.
+
 ## 1. Feature Freeze
 
 - Do not add user-facing features.
@@ -18,13 +20,20 @@ Verify the version matches across:
 - `options.js` `CONTENT_SCRIPT_VERSION`
 - `options.html` visible build diagnostic
 
+Also verify the public release documentation is current:
+
+- `README.md` and `README.ko.md`
+- `docs/architecture.md`
+- permissions, privacy, Native Messaging, and troubleshooting documents
+- `CHANGELOG.md`
+
 ## 3. Source Validation
 
 Run:
 
 ```sh
-./scripts/validate-release.sh
-node tests/previous-qa-html-learning-self-test.js
+bash scripts/validate-release.sh
+git diff --check
 ```
 
 ## 4. Privacy Scan
@@ -39,7 +48,7 @@ Check for:
 
 ## 5. Release Candidate
 
-Create a release commit and annotated RC tag:
+Create a release commit and annotated RC tag, substituting the approved version:
 
 ```sh
 git commit -m "Release v1.5.40"
@@ -47,6 +56,8 @@ git tag -a v1.5.40-rc.1 -m "Release candidate 1 for v1.5.40"
 ```
 
 Do not overwrite existing tags.
+
+The candidate tree must be committed and clean before archive generation. Current `scripts/package-release.sh` copies the extension/native archives from the working tree but creates the source archive from `HEAD`; it does not itself reject a dirty tree. Running it with uncommitted changes can produce mismatched archives. This is a documented tooling limitation, not an authorization to alter release history.
 
 ## 6. Manual Smoke Testing
 
@@ -74,7 +85,7 @@ Confirm:
 
 ## 9. Final Tag
 
-Create the final local tag only after required validation and macOS smoke tests pass:
+Create the final local tag only after required validation and macOS smoke tests pass, substituting the approved version:
 
 ```sh
 git tag -a v1.5.40 -m "Release v1.5.40"

@@ -33,7 +33,7 @@ If the extension is loaded from a different folder or copy, Chrome may assign a 
 
 ## Install the Native Helper
 
-Native-helper mode is optional for normal Markdown URI saving, but required for direct vault writes and HTML attachment saving.
+Native-helper mode is optional for normal Markdown URI saving, but required for direct vault writes, HTML attachment saving, and exact downloaded detailed-Markdown insertion. Current development remote-reference notes also require Native saving and never use URI fallback.
 
 macOS:
 

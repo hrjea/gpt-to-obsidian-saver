@@ -27,11 +27,13 @@ import json, re, sys
 from pathlib import Path
 manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
 content = Path("content.js").read_text(encoding="utf-8")
+background = Path("background.js").read_text(encoding="utf-8")
 options = Path("options.js").read_text(encoding="utf-8")
 options_html = Path("options.html").read_text(encoding="utf-8")
 values = {
     "manifest": manifest.get("version"),
     "content": re.search(r'const VERSION = "([^"]+)"', content).group(1),
+    "background": re.search(r'const VERSION = "([^"]+)"', background).group(1),
     "options_build": re.search(r'const BUILD_VERSION = "([^"]+)"', options).group(1),
     "options_content": re.search(r'const CONTENT_SCRIPT_VERSION = "([^"]+)"', options).group(1),
 }
@@ -57,6 +59,9 @@ actual = manifest.get("permissions", [])
 if actual != expected:
     print(f"permissions mismatch: {actual!r}")
     sys.exit(1)
+if manifest.get("optional_permissions", []) != ["clipboardRead"]:
+    print(f"optional permissions mismatch: {manifest.get('optional_permissions')!r}")
+    sys.exit(1)
 expected_hosts = ["https://chat.openai.com/*", "https://chatgpt.com/*"]
 if manifest.get("host_permissions", []) != expected_hosts:
     print(f"host permissions mismatch: {manifest.get('host_permissions')!r}")
@@ -71,6 +76,8 @@ done
 check_cmd "content behavior self-test" node tests/previous-qa-html-learning-self-test.js
 check_cmd "generated artifact mapping self-test" node tests/generated-markdown-and-multi-html-self-test.js
 check_cmd "options path persistence self-test" node tests/options-path-settings-self-test.js
+check_cmd "background clipboard permission self-test" node tests/background-clipboard-permission-self-test.js
+check_cmd "Visualize share reference self-test" node tests/visualize-share-reference-self-test.js
 
 check_cmd "manifest JSON" python3 -m json.tool manifest.json
 check_cmd "English locale JSON" python3 -m json.tool _locales/en/messages.json
@@ -99,11 +106,13 @@ required_files=(
   README.md README.ko.md LICENSE CHANGELOG.md CONTRIBUTING.md SECURITY.md RELEASE_CHECKLIST.md .gitignore
   docs/architecture.md docs/permissions.md docs/privacy.md docs/privacy.ko.md docs/native-messaging.md
   docs/troubleshooting.md docs/manual-smoke-test.md docs/release.md docs/github-installation.md
-  docs/codex-for-oss-application-notes.md assets/screenshots/README.md
+  assets/screenshots/README.md
   scripts/validate-release.sh scripts/package-release.sh
   tests/previous-qa-html-learning-self-test.js
   tests/generated-markdown-and-multi-html-self-test.js
   tests/options-path-settings-self-test.js
+  tests/background-clipboard-permission-self-test.js
+  tests/visualize-share-reference-self-test.js
   .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml
   .github/ISSUE_TEMPLATE/config.yml .github/PULL_REQUEST_TEMPLATE.md
   native-host/native-open-obsidian.py native-host/native-open-obsidian.sh native-host/native-open-obsidian.cmd
@@ -119,6 +128,56 @@ for file in "${required_files[@]}"; do
   fi
 done
 if [ "$missing" -eq 0 ]; then pass "required public files"; else fail "required public files"; fi
+
+private_paths=(
+  AGENTS.md requirements.md docs/project-memory.md docs/adr
+  docs/debugging/reproduction-index.md docs/interfaces docs/project-history.md
+  docs/verification-checklist.md docs/superpowers
+)
+private_path_found=0
+for path in "${private_paths[@]}"; do
+  if [ -e "$path" ]; then
+    printf '  private canonical path present: %s\n' "$path"
+    private_path_found=1
+  fi
+done
+if [ "$private_path_found" -eq 0 ]; then pass "no private canonical files"; else fail "no private canonical files"; fi
+
+if python3 - <<'PY' >/tmp/gpt_obsidian_markdown_links.out 2>&1
+from pathlib import Path
+import re
+import sys
+
+errors = []
+for path in sorted(Path(".").rglob("*.md")):
+    if any(part in {".git", "dist"} for part in path.parts):
+        continue
+    text = path.read_text(encoding="utf-8")
+    scan_text = re.sub(r"```.*?```", lambda match: "\n" * match.group(0).count("\n"), text, flags=re.S)
+    for match in re.finditer(r"(?<!!)\[[^\]]*\]\(([^)]+)\)", scan_text):
+        raw_target = match.group(1).strip()
+        if raw_target.startswith("<") and raw_target.endswith(">"):
+            raw_target = raw_target[1:-1]
+        target = raw_target.split("#", 1)[0]
+        if not target or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
+            continue
+        target = target.split(" ", 1)[0]
+        resolved = (path.parent / target).resolve()
+        if not resolved.exists():
+            line = scan_text.count("\n", 0, match.start()) + 1
+            errors.append(f"{path}:{line}: missing local Markdown target {raw_target}")
+
+if errors:
+    print("\n".join(errors))
+    sys.exit(1)
+print("local Markdown links ok")
+PY
+then
+  pass "local Markdown link targets"
+else
+  fail "local Markdown link targets"
+  sed 's/^/  /' /tmp/gpt_obsidian_markdown_links.out
+fi
 
 python3 - <<'PY' >/tmp/gpt_obsidian_icons.out
 import json, sys

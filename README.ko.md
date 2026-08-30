@@ -20,9 +20,12 @@ GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 �
 - Native helper 없이 Obsidian URI mode를 사용할 수 있습니다.
 - 직접 파일 저장과 HTML 첨부 저장을 위한 native-helper mode를 지원합니다.
 - 실제 HTML artifact와 즉시 발생한 Chrome HTML 다운로드를 첨부파일로 저장합니다.
+- 현재 저장 동작에 안전하게 대응하는 생성된 상세 Markdown artifact 하나를 확인하거나 다운로드할 수 있으면 노트에 보존합니다.
 - 실제 HTML 첨부가 있는 노트는 HTML 학습자료 섹션을 노트 상단에 배치합니다.
 - HTML 학습자료 저장 시 이전 Q&A를 사용하는 옵션을 제공합니다.
 - 영어/한국어 UI를 제공합니다.
+
+현재 저장소의 개발 버전(1.5.47, 아직 태그·패키지 공개 릴리스 아님)은 상호작용형 앱을 명시적으로 승인한 partial 노트와 엄격히 검증한 ChatGPT 공유 URL 기반 Native-only 원격 참조로 구분합니다. 현재 동작과 신뢰 경계는 [공개 architecture](docs/architecture.md)를 참고하세요.
 
 ## 지원 플랫폼
 
@@ -35,6 +38,8 @@ GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 �
 ## 배포 방식
 
 현재 이 프로젝트는 GitHub Releases를 통해서만 배포되며, Chrome의 Load unpacked 기능으로 설치합니다.
+
+아래에서 설명하는 최신 태그·공개 패키지는 v1.5.40입니다. 저장소 개발 버전은 더 새로울 수 있으므로, 개발 동작을 공개 릴리스로 간주하기 전에 버전 필드·테스트·[CHANGELOG.md](CHANGELOG.md)·[공개 architecture](docs/architecture.md)를 확인해야 합니다.
 
 Chrome Web Store에서는 제공되지 않습니다. Chrome Web Store 설치, listing, review, 자동 업데이트 동작을 기대하면 안 됩니다.
 
@@ -77,6 +82,9 @@ Chrome 확장 프로그램은 임의의 로컬 파일을 직접 쓸 수 없습�
 - vault에 Markdown 파일을 직접 생성할 때
 - HTML artifact를 첨부파일로 저장할 때
 - 즉시 발생한 Chrome HTML 다운로드를 vault로 복사할 때
+- 현재 저장 동작의 정확한 생성 상세 Markdown 다운로드 fallback이 필요할 때
+
+현재 일반 답변에 Native-only artifact가 없으면 여전히 Obsidian URI mode를 사용합니다. 로컬 Vault path를 설정했다는 이유만으로 일반 노트가 직접 Native write로 바뀌지는 않습니다.
 
 Native host의 allowed origin은 Chrome에 표시되는 실제 extension ID와 정확히 일치해야 합니다. Unpacked extension ID는 다른 경로나 복사본에서 로드하면 바뀔 수 있습니다. extension ID가 바뀌면 새 ID로 native-helper installer를 다시 실행하세요.
 
@@ -111,7 +119,7 @@ PowerShell:
 - Language: 영어 또는 한국어 UI
 - Obsidian Vault name: Obsidian URI open/create 호출에 사용
 - Local Obsidian vault path: native-helper 직접 저장에 필요
-- Save folder path: vault 안의 상대 노트 폴더
+- Save folder path: vault 안의 상대 노트 폴더. 저장된 키가 없으면 최초 설치 기본값 `ChatGPT`를 사용하고, 사용자가 명시적으로 빈 값을 저장하면 Vault 루트를 대상으로 합니다.
 - HTML file save folder: vault 안의 상대 첨부 폴더. 비우면 `Attachments`
 - Add date prefix: 파일명에 `YYYY-MM-DD` 추가
 - Also add time: 날짜 뒤에 `HH-mm-ss` 추가
@@ -177,7 +185,8 @@ PowerShell:
 | --- | --- |
 | `storage` | 언어, vault 이름, 폴더 경로, 기능 toggle 같은 설정 저장 |
 | `nativeMessaging` | 로컬 native helper 호출로 vault 직접 저장 및 HTML 첨부 저장 |
-| `downloads` | 사용자가 Save to Obsidian을 누른 직후 다운로드된 HTML 파일을 식별해 그 특정 파일만 Obsidian vault로 복사 |
+| `downloads` | 현재 저장 동작에서 예상한 HTML 또는 생성 상세 Markdown 파일을 bounded watch로 식별해, 정확히 일치하는 파일만 로컬 helper가 복사하거나 읽도록 함 |
+| `clipboardRead` (선택적, 현재 개발 상태) | 명시적으로 승인한 원격 참조 Share 절차에서만 요청하며, 현재 동작의 엄격한 성공 신호 뒤 새로 복사된 값 하나만 읽을 수 있음. 검증된 ChatGPT 공유 URL만 저장 가능 |
 | `https://chatgpt.com/*` | ChatGPT 메시지에 저장 버튼을 주입하고 사용자가 저장을 실행한 메시지를 읽음 |
 | `https://chat.openai.com/*` | 이전 ChatGPT 도메인 지원 |
 
@@ -185,7 +194,9 @@ PowerShell:
 
 ## 개인정보 요약
 
-확장 프로그램은 사용자가 Save to Obsidian을 클릭했을 때 ChatGPT 페이지 내용을 로컬에서 처리합니다. 설정은 Chrome extension storage에 저장되고, 데이터는 Obsidian URI mode 또는 Chrome Native Messaging을 통해 로컬에 저장됩니다. 분석, telemetry, tracking, 개발자 서버, 원격 저장소, 사용자 데이터 판매 기능은 추가하지 않습니다.
+확장 프로그램은 사용자가 Save to Obsidian을 클릭했을 때 ChatGPT 페이지 내용을 로컬에서 처리합니다. 설정은 Chrome extension storage에 저장되고, 데이터는 Obsidian URI mode 또는 Chrome Native Messaging을 통해 로컬에 저장됩니다. 분석, telemetry, tracking, 개발자 운영 원격 저장소, 사용자 데이터 판매 기능은 추가하지 않습니다.
+
+현재 개발 상태에는 한 가지 명시적 원격 공유 예외가 있습니다. 별도 동의 후 ChatGPT의 화면 Share UI를 조작하고 검증된 ChatGPT 공유 URL을 온라인 전용 참조로 저장할 수 있습니다. Vault 노트나 첨부파일을 개발자 서비스로 업로드하지 않으며, 공유 앱을 로컬 복사본이라고 표시하지 않습니다.
 
 현재 페이지 URL은 노트 source로 기록될 수 있습니다. Native-helper mode는 설정된 로컬 vault path를 사용해 노트와 첨부파일을 씁니다.
 
@@ -194,7 +205,7 @@ PowerShell:
 ## 보안 모델
 
 - Content script는 ChatGPT host permission에서만 실행됩니다.
-- Background service worker가 native messaging과 즉시 HTML 다운로드 matching을 중개합니다.
+- Background service worker가 Native Messaging, 현재 artifact에 한정된 bounded download matching, 선택적 permission 요청을 중개합니다.
 - Native helper는 설정된 vault path 안에만 노트와 첨부파일을 씁니다.
 - 첨부파일명과 노트 경로를 검증합니다.
 - HTML 파일은 텍스트/파일 콘텐츠로 저장되며, 확장 프로그램과 native helper는 HTML을 실행하지 않습니다.
@@ -219,6 +230,10 @@ Native host 오류, extension ID mismatch, 오래된 unpacked build, HTML 첨부
 ## 기여
 
 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요. 공개 issue 또는 pull request에 private ChatGPT conversation, 실제 vault path, token, credential, 민감한 log를 포함하지 마세요.
+
+## 개발
+
+[CONTRIBUTING.md](CONTRIBUTING.md), [공개 architecture](docs/architecture.md), 공개 regression test를 참고하세요. 변경을 제안하기 전에 `bash scripts/validate-release.sh`를 실행하세요.
 
 ## License
 

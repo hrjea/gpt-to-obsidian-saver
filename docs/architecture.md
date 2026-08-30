@@ -1,81 +1,157 @@
 # Architecture
 
+Status: public architecture overview for development version 1.5.47. Tagged release documentation may still target v1.5.40.
+
+## System context
+
 ```text
 ChatGPT page
   -> content.js
-  -> background service worker
-  -> Obsidian URI mode
+     -> background.js -> obsidian:// URI
+     -> background.js -> Chrome Native Messaging
+        -> native-host/native-open-obsidian.py
+        -> configured Obsidian vault
 
-ChatGPT page
-  -> content.js
-  -> background service worker
-  -> Chrome Native Messaging
-  -> native-host/native-open-obsidian.py
-  -> configured Obsidian vault
+ChatGPT page (explicit shared-app save only)
+  -> content.js -> current response or consented whole-conversation Share UI
+  -> validated ChatGPT share URL
+  -> background.js -> Native Messaging -> remote-reference Markdown note
 ```
 
-## Components
+There is no developer-operated application server. Ordinary extraction and saving are local. The shared-app path is an explicit exception: it invokes ChatGPT sharing through the visible UI after consent and stores only a strictly validated share URL as a remote reference.
+
+## Components and responsibilities
 
 ### `content.js`
 
-- Runs on `chatgpt.com` and `chat.openai.com`.
-- Adds Save to Obsidian buttons to assistant messages.
-- Converts ChatGPT HTML to Markdown.
-- Finds the relevant user question and assistant answer.
-- Detects real HTML artifacts.
-- Builds the Markdown note payload.
-- Sends save requests to the background service worker.
+- Injects `Obsidian 저장` / `Save to Obsidian` buttons into eligible assistant messages.
+- Identifies current and previous Q&A context by verified message roles and turn structure.
+- Converts selected ChatGPT DOM content to Markdown.
+- Detects file-like deliverables, generated detailed Markdown, HTML artifacts, and rich app blocks.
+- Performs capture-integrity, runtime, path/assembly, and share preflight checks.
+- Builds normal, HTML learning, partial, Visualize, provider-neutral rich-app, and whole-conversation remote-reference notes.
+- Requests explicit background operations implemented and tested in `background.js`.
+- Owns user consent for partial capture and sharing.
+
+`content.js` is intentionally fail-closed where ChatGPT DOM state is missing or ambiguous.
 
 ### `background.js`
 
-- Receives messages from the content script.
-- Opens Obsidian URI requests.
-- Calls Chrome Native Messaging for native-helper saves.
-- Tracks immediate HTML downloads when page-readable extraction fails.
-- Rejects stale or unrelated downloads by using watch timing, expected extension, and filename hints.
+- Provides a versioned runtime ping and Native helper preflight.
+- Requests the optional `clipboardRead` permission only on an explicit content-script request.
+- Opens Obsidian URI requests and mediates all Native Messaging.
+- Starts, awaits, and cancels bounded HTML/Markdown download watches.
+- Correlates downloads with the current save window and expected filenames.
+- Rejects duplicate URI/save requests for a short bounded period.
+- Normalizes Native helper responses before returning them to the content script.
 
-### Native Helper
+### `options.js` / `options.html`
 
-- Receives Native Messaging payloads.
-- Validates `vaultPath`.
-- Resolves note and attachment paths.
-- Prevents path traversal and vault escapes.
-- Reads only the downloaded HTML file explicitly reported for the current save operation.
-- Writes notes and attachments inside the configured vault.
-- Generates note-relative attachment links.
+- Own the settings UI and English/Korean labels.
+- Store general settings in `chrome.storage.sync`.
+- Store machine-local `vaultPath` and `htmlSaveDir` in `chrome.storage.local`.
+- Migrate legacy synced `htmlSaveDir` once and verify stored values after Save.
+- Display version and resolved path diagnostics.
 
-## HTML Extraction Flow
+### `native-host/native-open-obsidian.py`
 
-The content script first tries direct page-readable extraction:
+- Implements Chrome Native Messaging framing.
+- Accepts `ping`, `save-note`, and URI-open requests.
+- Validates vault, note, attachment, downloaded-file, size, and marker contracts.
+- Writes only inside the configured vault.
+- Rewrites verified local HTML links and Native placeholders.
+- Returns note/attachment audit data including byte counts and SHA-256 values.
+- Opens the durably written note in Obsidian where supported.
 
-- `blob:` href
-- `data:` href
-- same-origin downloadable href
-- `a[download]` href when fetchable
-- iframe `srcdoc`
-- iframe `blob:` source when fetchable
-- accessible preview frame document
+### Installers and release scripts
 
-If direct extraction fails, the background service worker can watch Chrome downloads for a newly completed `.html` or `.htm` file associated with the current Save action.
+- Platform installers register a user-level Native Messaging host for one extension ID.
+- `scripts/validate-release.sh` is the automated project gate.
+- `scripts/package-release.sh` validates, packages platform artifacts, checks archive hygiene, and writes checksums.
 
-## Native Validation
+## Save flows
 
-The native helper validates:
+### 1. Normal Markdown / URI-capable flow
 
-- Note path is relative and inside the vault.
-- Attachment directory resolves inside the vault.
-- Attachment filename is safe and ends in `.html` or `.htm`.
-- Downloaded source path is a specific file reported for the active save.
-- Total attachment size stays within configured limits.
+1. User clicks Save on an assistant response.
+2. Content script resolves the current question/answer and converts Markdown.
+3. It builds a note with `title`, `source`, `created`, and tags.
+4. An ordinary note without a Native-only artifact is sent through Obsidian URI mode; merely configuring `vaultPath` does not switch this path to a direct Native file write.
+5. The background may use the Native helper to open the URI, and the content script may attempt a direct browser URI if that route fails. Neither path can verify that Obsidian created the file.
 
-## URI Fallback
+### 2. HTML and generated-file Native flow
 
-Normal notes without real HTML attachments can use Obsidian URI mode. If native save fails for a note that also has a URI fallback, the extension attempts the URI fallback and reports that attachments may not have been saved.
+1. Content script inventories visible file and rich-artifact expectations.
+2. It reads page-accessible HTML or a unique detailed Markdown viewer when possible.
+3. If required, it starts a bounded exact-current download watch before asking for the one real user click.
+4. It compares expected and captured deliverables.
+5. Missing content cancels by default; supported partial capture requires explicit consent.
+6. Runtime checks complete before the final save; Native-only artifact flows require the configured Vault path/helper.
+7. Native helper validates and writes attachments, replaces markers, writes the note, and returns an audit.
+8. Content script rejects a non-partial result whose requested/written audit is incomplete.
 
-## Duplicate Protection
+### 3. Interactive rich-app partial flow
 
-The content script and background service worker keep short-lived duplicate-save keys to reduce accidental duplicate saves from immediate repeated clicks.
+When an app block has no verified complete local representation and no approved remote-reference path, the extension cancels by default. If the user explicitly accepts partial capture, only readable outer text and verified files are saved with permanent `capture_status: partial` metadata and a warning. The iframe/app shell is not represented as a local copy.
 
-## External Services
+### 4. Response-scoped remote-reference flow
 
-The extension has no external application server. It does not send note content to a developer-operated service.
+1. Resolve `previous-qa`, `direct-visualize`, or provider-neutral `rich-app-continuation` context.
+2. Complete all read-only context, artifact, file, Markdown, title/path, runtime, and Native preflight checks.
+3. Ask for share/clipboard consent.
+4. Re-resolve one Share control inside the current assistant response action toolbar immediately before clicking.
+5. Reuse or create a link through a classified visible share surface.
+6. Accept a URL only through the strict final validator.
+7. Build mode-specific `remote-reference` Markdown.
+8. Save through Native only. URI fallback is forbidden for this flow.
+
+### 5. Whole-conversation remote-reference fallback
+
+This fallback is broader than response sharing and has a separate consent boundary.
+
+1. It is considered only when the response-scoped trigger is missing, not when that trigger is ambiguous.
+2. The exact visible header `[data-testid='share-chat-button']` must be unique and revalidated before click.
+3. The result may be a classified share surface or a fresh strict whole-conversation copy-success signal. One visually rendered success toast plus its `sr-only` ARIA live-region mirror is canonicalized as one semantic signal only when that exact structural pair is present; independent signals or a simultaneous surface/signal remain ambiguous and fail closed.
+4. The final URL must pass strict validation.
+5. The note uses `conversation_share_url`, `share_scope: conversation`, and `target_turn_id`; it must not claim `visualize_share_url` semantics.
+
+## Trust boundaries
+
+### ChatGPT DOM
+
+ChatGPT page structure is untrusted and changes over time. Role, turn, file, viewer, app, toolbar, dialog, status, and URL candidates must be structurally validated and unique. Text similarity alone is not sufficient provenance.
+
+### Clipboard
+
+Clipboard access is optional. It is requested only during an approved share flow and may be read once only after a fresh strict success signal. Raw values are not logged or persisted; only a validated URL may enter a note.
+
+### Background service worker
+
+The background script is the boundary for Native Messaging, downloads, and optional permission requests. Content scripts do not receive broad filesystem access.
+
+### Native helper and filesystem
+
+The Native helper treats all incoming paths and content metadata as untrusted. It validates the vault boundary before writing and validates downloaded source files before reading them.
+
+### Remote share links
+
+A share URL is not a local copy and may expose content according to ChatGPT policy. The note must state its remote-only and offline-unavailable status. A created or updated link may remain active if later saving fails; the extension warns but does not auto-revoke it.
+
+## Integrity and size boundaries
+
+Current public boundaries include a 16 MiB Native message ceiling, at most 100 HTML attachments, 12 MiB aggregate attachment bytes, 700,000 characters per HTML text attachment, and bounded detailed Markdown limits.
+
+## Duplicate and runtime protection
+
+- The content script prevents simultaneous saves for the same response and keeps short-lived recent-save state.
+- The background worker deduplicates URI/native requests for 30 seconds.
+- Runtime ping/guard checks stop operations after an unpacked extension reload.
+- Active download watches are cancelled when the runtime becomes unavailable.
+
+## Public compatibility contract
+
+- Normal Markdown notes may use Obsidian URI mode; Native-only artifact and remote-reference flows require the Native helper.
+- Incomplete rich artifacts cancel by default and require explicit consent before a permanently marked partial note.
+- Remote references contain only a strictly validated ChatGPT share URL, are online-only, and never claim a local interactive copy.
+- Native writes remain Vault-bounded and return attachment/note audit metadata.
+- Missing or ambiguous message, artifact, Share, or URL candidates fail closed instead of selecting a fallback by similarity.

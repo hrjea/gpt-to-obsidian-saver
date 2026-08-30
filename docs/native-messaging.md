@@ -2,6 +2,8 @@
 
 Native messaging is used because Chrome extensions cannot directly write arbitrary local files. The local native helper enables direct Markdown saves and HTML attachment copying into a configured Obsidian vault.
 
+This page is an operational installation guide. Release archive names below refer to the latest tagged/public v1.5.40 package, not the newer repository development version. The Native helper accepts only validated URI/ping/save requests and keeps all writes inside the configured Vault.
+
 ## Extension ID
 
 1. Open `chrome://extensions`.

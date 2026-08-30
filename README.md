@@ -20,9 +20,12 @@ Selected public-safe screenshots are also available in [assets/screenshots](asse
 - Supports Obsidian URI mode without a native helper.
 - Supports native-helper mode for direct local file output and HTML attachments.
 - Saves real HTML artifacts and immediate Chrome HTML downloads as attachments.
+- Preserves one exact generated detailed-Markdown artifact in the note when it can be safely resolved or downloaded for the current save.
 - Places the HTML learning-material section at the top of notes that contain real HTML attachments.
 - Optionally uses the previous Q&A pair when saving HTML learning notes.
 - Provides English and Korean UI labels.
+
+The repository development version (1.5.47, not yet a tagged packaged release) also distinguishes explicitly approved partial rich-app notes from Native-only remote references backed by a strictly validated ChatGPT share URL. See [the public architecture](docs/architecture.md) for the current behavior and trust boundaries.
 
 ## Supported Platforms
 
@@ -35,6 +38,8 @@ Selected public-safe screenshots are also available in [assets/screenshots](asse
 ## Distribution
 
 The project is currently distributed through GitHub Releases only. It is installed as an unpacked Chrome extension.
+
+The latest tagged/public package documented below is v1.5.40. The repository development version is newer, so version fields, tests, [CHANGELOG.md](CHANGELOG.md), and [the public architecture](docs/architecture.md) must be inspected before treating development behavior as released.
 
 This project is not available through the Chrome Web Store. Do not expect Chrome Web Store installation, listing, review, or automatic update behavior.
 
@@ -77,6 +82,9 @@ Native-helper mode is required for:
 - Direct Markdown file creation in the vault.
 - HTML artifact attachment saving.
 - Chrome downloads fallback for immediate HTML downloads.
+- Exact current generated detailed-Markdown download fallback.
+
+The current ordinary response path still uses Obsidian URI mode when it has no Native-only artifact; configuring a local Vault path does not by itself change that note to a direct Native write.
 
 The native host allowed origin must match the actual extension ID shown by Chrome. Unpacked extension IDs can change when the extension is loaded from a different path or copy. If the extension ID changes, rerun the native-helper installer with the new ID.
 
@@ -111,7 +119,7 @@ Linux native-helper mode is unsupported in this release.
 - Language: English or Korean UI.
 - Obsidian Vault name: used for Obsidian URI open/create calls.
 - Local Obsidian vault path: required for native-helper direct saves.
-- Save folder path: relative note folder inside the vault.
+- Save folder path: relative note folder inside the vault. A missing stored key uses the first-install `ChatGPT` default; an explicitly saved empty value targets the Vault root.
 - HTML file save folder: relative attachment folder inside the vault. Defaults to `Attachments` when empty.
 - Add date prefix: adds `YYYY-MM-DD` to file names.
 - Also add time: adds `HH-mm-ss` after the date.
@@ -177,7 +185,8 @@ If the previous pair is unavailable, the note falls back safely to the current q
 | --- | --- |
 | `storage` | Stores extension settings such as language, vault name, folder path, and feature toggles. |
 | `nativeMessaging` | Calls the local native helper for direct vault writes and HTML attachment saving. |
-| `downloads` | Used only to identify the HTML file downloaded immediately after the user clicks Save to Obsidian, so that specific file can be copied into the configured Obsidian vault. The extension does not scan, upload, or transmit unrelated files from the Downloads folder. |
+| `downloads` | Used only for a bounded active-save watch for an expected HTML or generated detailed-Markdown filename, so the exact current file can be copied/read by the local helper. The extension does not scan, upload, or transmit unrelated files. |
+| `clipboardRead` (optional, current development) | Requested only during an explicitly approved remote-reference Share flow. It may read one freshly copied value after a strict current-action success signal; only a validated ChatGPT share URL can be stored. |
 | `https://chatgpt.com/*` | Injects the Save to Obsidian button and reads the selected ChatGPT message when the user invokes saving. |
 | `https://chat.openai.com/*` | Supports the older ChatGPT domain with the same behavior. |
 
@@ -185,7 +194,9 @@ See [docs/permissions.md](docs/permissions.md).
 
 ## Privacy Summary
 
-The extension processes ChatGPT page content locally when the user clicks Save to Obsidian. It stores settings in Chrome extension storage and saves notes locally through Obsidian URI mode or Chrome Native Messaging. It does not add analytics, telemetry, tracking, developer servers, remote storage, or data sale behavior.
+The extension processes ChatGPT page content locally when the user clicks Save to Obsidian. It stores settings in Chrome extension storage and saves notes locally through Obsidian URI mode or Chrome Native Messaging. It does not add analytics, telemetry, tracking, developer-operated remote storage, or data sale behavior.
+
+Current development has one explicit remote-sharing exception: after separate consent, it may operate ChatGPT's visible Share UI and store a validated ChatGPT share URL as an online-only reference. It does not upload Vault notes or attachments to a developer service, and it does not claim the shared app is a local copy.
 
 The current page URL can be recorded as the note source. Native-helper mode uses the configured local vault path to write notes and attachments.
 
@@ -194,7 +205,7 @@ See [docs/privacy.md](docs/privacy.md) and [docs/privacy.ko.md](docs/privacy.ko.
 ## Security Model
 
 - The content script runs only on ChatGPT host permissions.
-- The background service worker mediates native messaging and immediate HTML download matching.
+- The background service worker mediates Native Messaging, bounded current-artifact download matching, and optional permission requests.
 - The native helper writes note and attachment output only inside the configured vault path.
 - Attachment filenames and note paths are validated.
 - HTML files are stored as text/file content; the extension and native helper do not execute HTML.
@@ -219,6 +230,10 @@ See [docs/troubleshooting.md](docs/troubleshooting.md) for native host errors, e
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Do not include private ChatGPT conversations, real vault paths, tokens, credentials, or sensitive logs in public issues or pull requests.
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [the public architecture](docs/architecture.md), and the public regression tests. Run `bash scripts/validate-release.sh` before proposing a change.
 
 ## License
 

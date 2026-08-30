@@ -2,6 +2,12 @@
 
 Thank you for helping improve GPT to Obsidian Saver. This project handles local notes, ChatGPT page content, and native messaging, so privacy and reproducibility matter.
 
+## Public repository scope
+
+This repository contains the distributable extension source, installation and contributor documentation, public regression tests, and release tooling. Before changing behavior, read `docs/architecture.md`, the relevant user-facing documentation, the source, and the owning regression test.
+
+Keep contributions independently understandable from the public tree. Do not include private ChatGPT conversations, real Vault paths, local extension IDs, credentials, tokens, or internal work records.
+
 ## Bug Reports
 
 Use the bug report issue template. Include:
@@ -53,21 +59,48 @@ Windows native-helper support is Experimental and should be tested on a real Win
 Run:
 
 ```sh
-./scripts/validate-release.sh
-node tests/previous-qa-html-learning-self-test.js
+bash scripts/validate-release.sh
+git diff --check
 ```
 
-The release validation script checks JavaScript syntax, JSON syntax, Python compile/self-test, macOS installer syntax, required files, manifest permissions, and private-string hygiene.
+The release validation script checks version/permission consistency, JavaScript syntax, every repository JS self-test, JSON syntax, Python compile/self-test, installer syntax where tools are available, required files, and private-string/artifact hygiene. A skipped platform tool is not a PASS.
 
-## Coding Expectations
+## Coding Conventions
+
+- Keep the current no-build Manifest V3 layout unless an explicitly reviewed public change replaces it.
+- Use the surrounding style: two-space indentation and semicolons in JavaScript, four-space indentation in Python, and `set -euo pipefail` in Bash entry scripts.
+- Prefer small pure helpers for DOM classification, normalization, metadata assembly, and validation so synthetic fixtures can exercise them.
+- Keep asynchronous Chrome message channels explicit and bounded; clean up observers, timers, watches, and temporary UI on every exit.
+- Treat ChatGPT DOM, clipboard data, paths, downloads, and Native payloads as untrusted.
+- Select UI controls by verified scope, role, visibility, and uniqueness; do not add text-similarity or first-candidate fallbacks across trust boundaries.
+- Keep English/Korean user-visible strings and tests aligned.
+- Keep debug logging disabled by default and exclude content bodies, raw clipboard values, and private URLs from diagnostics.
+- Add exact final-Markdown/payload assertions for schema changes; testing only that a helper was called is insufficient.
+
+## Engineering Expectations
 
 - Keep runtime behavior small and local-first.
-- Do not add telemetry, analytics, tracking, remote storage, or external runtime services.
+- Do not add telemetry, analytics, tracking, developer-operated remote storage, or new external runtime services. The existing consented ChatGPT Share exception is documented in the public architecture, permissions, and privacy documents and must not be broadened implicitly.
 - Avoid broad filesystem access.
 - Preserve vault-bounded native-helper writes.
 - Preserve false-attachment protection for plain `.html` filenames.
 - Preserve favicon/decorative-image filtering.
 - Preserve English/Korean UI behavior.
+- Fail closed when artifacts, message topology, Share UI, or URLs are missing or ambiguous.
+- Distinguish local-complete, explicitly approved partial, and validated remote-reference results.
+- Do not claim live E2E success until the actual Vault note and attachments were inspected.
+
+## Documentation Coupling
+
+| Change | Required updates |
+| --- | --- |
+| User-visible behavior | regression tests, `CHANGELOG.md`, and applicable README/docs |
+| Architecture or trust-boundary change | `docs/architecture.md`, security/privacy docs, and tests |
+| Important bug fix | regression test and applicable troubleshooting guidance |
+| Permission/data-flow change | manifest, permissions/privacy docs, tests, and changelog |
+| Verification/release gate | public validation and release scripts/docs |
+
+Documentation-only changes do not require a version bump. Runtime behavior changes do.
 
 ## Pull Request Checklist
 

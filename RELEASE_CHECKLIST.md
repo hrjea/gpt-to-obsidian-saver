@@ -1,5 +1,7 @@
 # Release Checklist for v1.5.40
 
+This is immutable release evidence for v1.5.40, not a checklist for the current development version. Create a new version-specific checklist for a future release.
+
 Status values: PASS, MANUAL PASS, FAIL, NOT TESTED, SKIPPED, UNSUPPORTED.
 
 ## Static Validation

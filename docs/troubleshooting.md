@@ -1,5 +1,7 @@
 # Troubleshooting
 
+Report automatic fixture results and actual Chrome/Vault E2E results separately. Public bug reports must use sanitized examples only.
+
 ## Old Unpacked Version Still Loaded
 
 Reload the extension in `chrome://extensions`, confirm the displayed version, then refresh existing ChatGPT tabs. Content scripts from an older build can remain active until the page is refreshed.
@@ -68,11 +70,27 @@ If capture still fails, open the page console and look for `[GPT→Obsidian][art
 
 ChatGPT can render one visible Markdown viewer as a nested outer `stage-thread-flyout` and inner `screen-threadFlyOut`. The extension treats that pair as one viewer. Two independent visible viewers with the same filename remain an ambiguity and are not guessed.
 
+## Interactive App Share Save Stops Before a Note Is Created
+
+The failure message includes a stage. Preserve that exact stage and sanitized reason:
+
+- `preflight`: required context, artifact completeness, title/path assembly, runtime, or Native availability was not established. No Share click should occur.
+- `share-button`: the current response Share or approved whole-conversation header Share was missing, changed, or ambiguous. Do not use a different turn's or app toolbar's Share control.
+- `share-dialog`: no unique supported share surface or fresh whole-conversation copy outcome was established.
+- `share-url`: no single strict ChatGPT share URL was validated.
+- `native-save`: the URL was validated but the Obsidian write failed.
+
+Remote-reference saves require Native-helper mode and never use URI fallback. If the message says a share action may have succeeded but the note did not, inspect/manage the link in ChatGPT. The extension does not automatically revoke it.
+
+ChatGPT can render one successful copy action as both a visual alert and an `sr-only` ARIA live-region mirror. Current development canonicalizes only that verified structural pair. Independent copy signals, multiple surfaces, or a simultaneous surface/signal still fail closed and retain distinct diagnostic subtypes.
+
 ## Note and HTML Folders Resolve to Different Roots
 
 Options shows the final Markdown note path and HTML attachment path computed from the stored settings. A warning appears when the first relative folder differs, such as `ChatGPT` versus `ChatGPT_Test`.
 
 Saving remains allowed because custom layouts are supported. To restore the conventional layout, use the button that sets the HTML folder to `<note folder>/Attachments`, then click Save. The page reads both storage areas again and reports when the persisted values have been verified.
+
+Current development distinguishes a missing note-folder key from an explicitly empty value: missing keeps the `ChatGPT` first-install default, while explicit empty means Vault root. If a reloaded extension still writes an explicitly empty setting under `ChatGPT/`, report the persisted setting and final note path using sanitized placeholders; do not move the note silently.
 
 ## HTML Downloaded but Not Copied to Vault
 

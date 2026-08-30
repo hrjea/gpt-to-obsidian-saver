@@ -44,7 +44,9 @@ body:
       label: Save mode
       options:
         - Obsidian URI mode
-        - Native-helper mode
+        - Native-helper local file/artifact mode
+        - Response-scoped remote-reference mode
+        - Whole-conversation remote-reference fallback
         - Not sure
     validations:
       required: true
@@ -67,15 +69,25 @@ body:
       label: Actual result
     validations:
       required: true
+  - type: input
+    id: failure-stage
+    attributes:
+      label: Exact failure stage and sanitized reason, if shown
+      description: Examples include preflight, share-button, share-dialog, share-url, native-save, or runtime. Do not paste a private URL.
+  - type: textarea
+    id: side-effects
+    attributes:
+      label: Observed side effects and Vault result
+      description: State whether Share/Create/Update/copy, URI, or Native save ran, and whether an actual note/attachment appeared. Do not include real paths or content.
   - type: textarea
     id: logs
     attributes:
       label: Sanitized logs
-      description: Remove private paths, extension IDs, vault names, tokens, credentials, and private ChatGPT content.
+      description: Remove private paths, extension IDs, vault names, tokens, credentials, ChatGPT conversation/share URLs, and private content.
   - type: checkboxes
     id: privacy
     attributes:
       label: Privacy confirmation
       options:
-        - label: I removed private ChatGPT content, vault data, credentials, tokens, private paths, and private extension IDs.
+        - label: I removed private ChatGPT content and URLs, vault data, credentials, tokens, private paths, and private extension IDs.
           required: true

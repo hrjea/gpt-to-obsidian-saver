@@ -1,5 +1,67 @@
 # Changelog
 
+## [1.5.47] - 2026-08-29
+
+- Support conversation-header Share builds that copy an existing public link immediately without opening a dialog, using a fresh whole-conversation status signal and the existing strict clipboard/manual URL boundary.
+- Keep generic share surfaces and response-specific Visualize paths unchanged; reject stale or generic copy toasts and never treat instant-copy as Create or Update.
+- Record `share_interaction: instant-copy` and `conversation_share_freshness: unverified`, preserve remote-reference metadata, and warn accurately if Native saving fails after the public link was copied.
+- Add live-shaped instant-copy, freshness, permission, strict-URL, metadata, and Native-failure regression coverage.
+- Canonicalize the verified pair of one visual copy-success toast and its `sr-only` ARIA live-region mirror as one instant-copy outcome, while preserving distinct fail-closed diagnostics for genuinely multiple signals or surfaces.
+- Honor an explicitly stored empty note folder as Vault root while retaining `ChatGPT` as the default only when the setting key is absent, with final path-builder regression coverage.
+
+## [1.5.46] - 2026-08-29
+
+- Add a safe whole-conversation share fallback when the current assistant response has no unambiguous response-specific Share control, requiring separate user consent and exact header `share-chat-button` scoping.
+- Distinguish missing and ambiguous response-share controls, revalidate the selected trigger immediately before clicking, and reject prompt-share or app-block lookalikes.
+- Require explicit consent before updating an existing conversation link, confirm a refreshed validated URL, and preserve created/updated-link warnings when Native saving fails.
+- Store conversation fallback links as provider-neutral `conversation_share_url` metadata with `share_scope: conversation`, the current target turn ID, and the mode-specific capture value; never relabel them as `visualize_share_url`.
+- Keep strict URL validation, Native-only saving, partial-capture consent, href-less protection, HTML previous-Q&A behavior, and existing Visualize/direct/continuation paths intact.
+- Add conversation fallback, stale-update, preflight, prompt-lookalike, strict-URL, and partial-warning regression coverage.
+
+## [1.5.45] - 2026-08-28
+
+- Add an optional, user-triggered `clipboardRead` permission path for Visualize share saves without expanding the extension's required permissions.
+- Support existing and newly created ChatGPT share links whose URL is not exposed in the DOM by clicking one unambiguous response-scoped `Copy link`, requiring a fresh copy-success UI signal, and reading the clipboard at most once.
+- Validate clipboard and manual input as a single absolute `https://chatgpt.com/s/...` or `/share/...` URL, rejecting credentials, ports, queries, fragments, conversation links, external hosts, Markdown, and additional text.
+- Fall back to an extension-owned empty manual input after permission denial, copy-signal failure, clipboard exceptions, or invalid clipboard content; never log or persist the raw clipboard/manual value.
+- Preserve Native-only saving, current-A2 toolbar scoping, Q1/A1 and rich/file preflight checks, existing-link no-mutation behavior, created-link failure warnings, and observer/timer cleanup.
+- Add permission, existing/new link, stale clipboard, manual fallback, ambiguity, privacy, replacement-surface, and failure-state regressions.
+- Add a strict direct-Visualize topology for Q2→A2 conversations, preserving the request text and optional outer explanation without mislabeling A2 as an original answer.
+
+## [1.5.44] - 2026-08-28
+
+- Fix live Visualize share-surface detection for existing-link dialogs whose only link operation is `Copy link` / `링크 복사`, while failing closed when ChatGPT does not expose the existing URL in the page DOM.
+- Track hidden and visible state changes on reused top-layer nodes, support structurally validated dialog/sheet/popover surfaces and one unambiguous intermediate button or `role=menuitem` share action, and reject ordinary dialogs that merely contain the word Share.
+- Require an explicitly identified current-A2 response action toolbar/group, excluding answer-body artifact toolbars, other-turn, global, hidden-mobile, and ambiguous Share controls.
+- Add a side-effect-free Native helper preflight before any Share click, plus privacy-bounded diagnostic stages with `ARTIFACT_DEBUG` still disabled by default.
+- Preserve created-share state across URL/runtime failures after the Create click and warn without claiming an unvalidated URL was confirmed.
+- Add portal, same-node transition, existing/new link, menu ambiguity, toolbar scope, timeout/no-save, observer/timer cleanup, and Native-preflight regressions.
+
+## [1.5.43] - 2026-08-28
+
+- Add a preflight-gated Visualize share-link save mode that reuses an existing response-scoped ChatGPT share URL or creates one only after explicit consent.
+- Store the original Q1/A1 Markdown with a validated share URL, remote-reference metadata, and a warning that interactive content is not an offline Vault copy.
+- Keep file/rich-artifact completeness checks, Native-only share saves, URI fallback disabled, and explicit reporting when a newly created share link remains after Native save failure.
+- Add bounded response-toolbar/dialog automation, URL validation, runtime guards, and deterministic regression coverage; keep artifact debug logging disabled by default.
+
+## [1.5.42] - 2026-08-28
+
+- Detect Visualize-style `[data-app-block-preview="true"]` containers as expected rich artifacts and combine their completeness with the existing file-deliverable audit.
+- Cancel incomplete rich-app saves by default; after explicit consent, save only the readable outer text with permanent partial-capture frontmatter and an Obsidian warning callout.
+- Remove unsupported app-block shells from cloned answer content without reading cross-origin frames, following sandbox URLs, clicking app states, or weakening Native attachment verification.
+- Normalize href-less file citation chips as labeled plain text and remove only context-bound ChatGPT app mention icons while preserving ordinary links, images, SVG content, and feedback wording.
+- Exclude app-block controls and frames from generated-file discovery and allow an immediate retry after an incomplete-save cancellation.
+- Add rich-artifact, mixed HTML/app-frame, partial-note, citation, icon, image, href-less link, and cancel/retry regression coverage.
+
+## [1.5.41] - 2026-08-26
+
+- Preserve ChatGPT file controls without a real `href` as plain text instead of creating broken `[filename]()` Markdown links.
+- Compare visible file-like deliverables with actually captured HTML and detailed Markdown before saving; cancel incomplete saves by default and require an explicit confirmation for body-only or partial saving.
+- Surface unresolved extraction failures in the user warning instead of silently discarding them.
+- Raise the verified native HTML batch limit from 20 to 100 files and the bounded aggregate payload from 5 MiB to 12 MiB.
+- Make native attachment writes auditable with requested/written names, counts, byte sizes, and SHA-256 hashes, and reject a non-partial save before writing the note when requested HTML content is missing.
+- Add regression coverage for addressless file links, explicit partial-save consent, empty-target cleanup, native audit mismatch, and a 50-file HTML batch.
+
 ## [1.5.40] - 2026-08-25
 
 - Canonicalize nested ChatGPT artifact flyouts to the inner `screen-threadFlyOut`, and collapse equivalent ancestor/descendant wrappers that expose the same detailed Markdown body.
