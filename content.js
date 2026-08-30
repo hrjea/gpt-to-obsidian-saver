@@ -1,7 +1,7 @@
 
-// content.js (1.5.40) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.47) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.40";
+  const VERSION = "1.5.47";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
@@ -9,7 +9,7 @@
   state.activeSaves = state.activeSaves || new Set();
   const generation = state.generation;
   const DEBUG = false;
-  const ARTIFACT_DEBUG = true;
+  const ARTIFACT_DEBUG = false;
   const MAX_HTML_ATTACHMENT_CHARS = 700000;
   const MAX_GENERATED_MARKDOWN_CHARS = 2000000;
   const GENERATED_MARKDOWN_VIEWER_TIMEOUT_MS = 90000;
@@ -18,10 +18,17 @@
   const RUNTIME_POLL_INTERVAL_MS = 1000;
   const RUNTIME_PING_TIMEOUT_MS = 1500;
   const RUNTIME_PING_TYPE = "gpt2obs-runtime-ping";
+  const NATIVE_PREFLIGHT_TYPE = "gpt2obs-native-preflight";
+  const CLIPBOARD_PERMISSION_REQUEST_TYPE = "gpt2obs-request-clipboard-read-permission";
+  const NATIVE_PREFLIGHT_TIMEOUT_MS = 2500;
   const DETAILED_MARKDOWN_HEADING = "장별 상세 한국어 요약";
   const DETAILED_MARKDOWN_MARKER = "%%GPT_OBSIDIAN_DETAILED_MARKDOWN%%";
   const MARKDOWN_OPEN_PROMPT_DELAY_MS = 800;
   const MARKDOWN_DOWNLOAD_PROMPT_DELAY_MS = 12000;
+  const SHARE_DIALOG_TIMEOUT_MS = 10000;
+  const SHARE_URL_TIMEOUT_MS = 15000;
+  const SHARE_POLL_MS = 100;
+  const FILE_DELIVERABLE_EXTENSIONS = ["html", "htm", "md", "mm", "json", "zip"];
 
   const SUPPORTED_LANGUAGES = ["en", "ko"];
   const DEFAULT_LANGUAGE = "en";
@@ -48,6 +55,51 @@
       markdownDownloadActionRequired: "ChatGPT requires a real click to download the detailed Markdown file. Close this message, then click the highlighted File download button once. The extension will use only that current .md download and continue saving automatically.",
       htmlDownloadActionRequired: "The extension could not read the HTML source directly. Close this message, then click the small File download button on the file card once. Do not click the HTML learning material preview button. The extension will wait up to 90 seconds and then save it to Obsidian.",
       htmlAttachmentSavedLine: "HTML file saved as attachment.",
+      partialArtifactSaveConfirm: "ChatGPT shows {missingCount} file deliverable(s) whose real content could not be captured.\n\nExpected HTML: {expectedHtmlCount}\nCaptured HTML: {capturedHtmlCount}\nMissing or unsupported: {missingNames}\n\nCancel stops the save (recommended). OK explicitly saves only the readable note body and any files that were actually captured.",
+      partialRichArtifactSaveConfirm: "This response contains {expectedRichCount} interactive app block(s), but only {completeRichCount} complete verified copy/copies can be saved.\n\nMissing app blocks: {missingRichCount}\nMissing file deliverables: {missingFileNames}\n\nCancel creates no Obsidian note or attachment (recommended). OK explicitly saves only the readable outer text, files that were actually captured, and a permanent missing-app warning.",
+      missingRichArtifactWarningTitle: "Interactive app block not saved",
+      missingRichArtifactWarningBody: "The original response contained {expectedRichCount} app block(s), but no savable original or verified complete static copy was available. Only the explanation outside the app block is included below.",
+      sourceFileDisplayName: "Source file display name: ",
+      nativeAttachmentAuditFailed: "The native helper reported an incomplete attachment save. The note may already exist, but these requested files were not verified: ",
+      visualizeShareConfirm: "To save this visualization in Obsidian, the extension will create or reuse a ChatGPT share link.\n\nIt will request the optional clipboard-read permission. After this attempt's Copy link action shows a fresh Copied confirmation, it may read the clipboard once only to validate that one ChatGPT share URL. The clipboard value is not logged, stored separately, or sent elsewhere; the validated link is written only into this Obsidian note. If permission or automatic reading is unavailable, an empty extension input will ask you to paste the link manually.\n\nDepending on the sharing settings, anyone with the link may be able to view the shared content. The visualization itself will not be copied into the Vault; it depends on an internet connection and the ChatGPT share page.\n\nCancel: do not request permission, click Share, or create a note\nOK: request permission, automate only the current visualization response's Share UI, and save the validated Visualize request context",
+      visualizeConsentTitle: "Save the shared visualization",
+      visualizeConsentContinue: "Continue",
+      visualizeConsentCancel: "Cancel",
+      visualizeShareHeading: "Visualization",
+      visualizeShareOpenLink: "Open shared visualization in ChatGPT",
+      directVisualizeRequestHeading: "Visualization Request",
+      directVisualizeExplanationHeading: "Visualization Explanation",
+      richAppShareHeading: "Interactive App",
+      richAppShareOpenLink: "Open shared app in ChatGPT",
+      richAppRequestHeading: "Request",
+      richAppExplanationHeading: "App Explanation",
+      richAppShareConfirm: "To save this interactive app in Obsidian, the extension will create or reuse a ChatGPT share link.\n\nIt will request the optional clipboard-read permission. After this attempt's Copy link action shows a fresh Copied confirmation, it may read the clipboard once only to validate that one ChatGPT share URL. The clipboard value is not logged, stored separately, or sent elsewhere; only the validated link is written into this Obsidian note. If permission or automatic reading is unavailable, an empty extension input will ask you to paste the link manually.\n\nThe app itself will not be copied into the Vault; it depends on an internet connection and the ChatGPT share page.\n\nCancel: do not request permission, click Share, or create a note\nOK: request permission, automate only the current app response's Share UI, and save the validated provider-neutral app context",
+      richAppConsentTitle: "Save the shared app",
+      richAppShareFailedPrefix: "Shared app save stopped at {stage}: {reason}",
+      richAppReferenceWarningTitle: "Remote app reference",
+      richAppReferenceWarningBody: "The interactive app is not a local file in the Vault. It depends on an internet connection and the ChatGPT share page, and may stop opening if sharing is disabled or access policies change.",
+      visualizeShareReferenceWarningTitle: "Remote visualization reference",
+      visualizeShareReferenceWarningBody: "The visualization is not a local file in the Vault. It depends on an internet connection and the ChatGPT share page, and may stop opening if sharing is disabled or access policies change. Depending on the sharing settings, people who know the link may be able to access it.",
+      visualizeShareFailedPrefix: "Visualize share save stopped at {stage}: {reason}",
+      visualizeManualShareTitle: "Paste the ChatGPT share link",
+      visualizeManualShareBody: "Automatic clipboard reading was unavailable. Paste the single https://chatgpt.com/s/… or https://chatgpt.com/share/… link below. The field starts empty.",
+      visualizeManualSharePlaceholder: "https://chatgpt.com/s/…",
+      visualizeManualShareSave: "Use this link",
+      visualizeManualShareCancel: "Cancel",
+      visualizeManualShareInvalid: "Enter one valid ChatGPT share link only.",
+      visualizeShareCreatedButSaveFailed: "A ChatGPT share link was created, but the Obsidian note was not saved. The share link may remain active. If needed, disable the share manually from ChatGPT; the extension will not disable it automatically.",
+      visualizeShareCreateAttemptUnverified: "ChatGPT's Create link action ran, but the share URL could not be validated and the Obsidian note was not saved. A share link may remain active. Check ChatGPT's share screen and disable it manually if needed; the extension will not disable it automatically.",
+      conversationShareConfirm: "The current answer does not provide an individual response-share action.\n\nIf you continue, the conversation content up to the share point may be shared, not only this visualization answer. This conversation share link will be saved in the Obsidian note.\n\nCancel: do not click Share or create a note\nOK: share the conversation and save only the validated conversation link",
+      conversationShareConsentTitle: "Save a conversation share link",
+      conversationShareUpdateConfirm: "An existing conversation share link may not include the current visualization. Update the share link to include the current content?",
+      conversationShareHeading: "Visualization",
+      conversationShareOpenLink: "Open the shared conversation containing the visualization",
+      conversationShareWarningTitle: "Whole-conversation share link",
+      conversationShareWarningBody: "This link may include conversation content up to the time it was shared, not only the current visualization.",
+      conversationShareFailedPrefix: "Conversation share save stopped at {stage}: {reason}",
+      conversationShareChangedButSaveFailed: "The whole-conversation share link was created or updated, but the Obsidian note was not saved. The link may remain active. If needed, manage or disable it manually from ChatGPT; the extension will not roll it back automatically.",
+      conversationShareCopiedButSaveFailed: "A whole-conversation public link was copied, but the Obsidian note was not saved. The link may remain active. If needed, manage or disable it manually from ChatGPT; the extension will not disable it automatically.",
+      conversationShareChangeAttemptUnverified: "The whole-conversation share action ran, but its URL was not validated and the Obsidian note was not saved. The link may remain active. Check ChatGPT's share screen and manage it manually if needed; the extension will not roll it back automatically.",
       runtimeUnavailable: "extension runtime unavailable",
       runtimeDisconnectedRefresh: "The extension was reloaded or its connection to this ChatGPT tab was lost. Refresh this tab, then click Save to Obsidian again."
     },
@@ -73,6 +125,51 @@
       markdownDownloadActionRequired: "ChatGPT가 상세 Markdown 파일 다운로드에 실제 클릭을 요구합니다. 이 창을 닫은 뒤 강조된 '파일 다운로드' 버튼을 한 번 눌러주세요. 확장 프로그램은 이번에 내려받은 .md 파일만 사용해 자동으로 저장을 계속합니다.",
       htmlDownloadActionRequired: "확장 프로그램이 HTML 원문을 직접 읽지 못했습니다. 이 창을 닫은 뒤 파일 카드 오른쪽의 작은 '파일 다운로드' 버튼을 한 번 눌러주세요. 'HTML 학습자료 다운로드' 미리보기 버튼이 아닙니다. 확장 프로그램은 최대 90초 동안 기다린 후 Obsidian에 저장합니다.",
       htmlAttachmentSavedLine: "HTML 파일은 첨부파일로 저장되었습니다.",
+      partialArtifactSaveConfirm: "ChatGPT 답변에 파일 산출물 {missingCount}개가 표시되지만 실제 내용을 안전하게 읽지 못했습니다.\n\n예상 HTML: {expectedHtmlCount}개\n확보한 HTML: {capturedHtmlCount}개\n누락 또는 미지원: {missingNames}\n\n취소를 누르면 저장을 중지합니다(권장). 확인을 누르면 읽을 수 있는 노트 본문과 실제로 확보한 파일만 부분 저장합니다.",
+      partialRichArtifactSaveConfirm: "이 응답에는 상호작용형 앱 블록 {expectedRichCount}개가 있지만, 완전한 것으로 검증해 저장할 수 있는 사본은 {completeRichCount}개입니다.\n\n누락 앱 블록: {missingRichCount}개\n누락 파일 산출물: {missingFileNames}\n\n취소를 누르면 Obsidian 노트와 첨부파일을 만들지 않습니다(권장). 확인을 누르면 앱 블록 바깥의 읽을 수 있는 설명문, 실제로 확보한 파일, 앱 블록 누락 경고만 부분 저장합니다.",
+      missingRichArtifactWarningTitle: "상호작용형 앱 블록 미저장",
+      missingRichArtifactWarningBody: "원본 응답에는 앱 블록 {expectedRichCount}개가 있었지만, 저장 가능한 원본 또는 검증된 완전 정적 사본을 확보하지 못했습니다. 아래에는 앱 블록 바깥의 설명문만 포함됩니다.",
+      sourceFileDisplayName: "출처 파일 표시명: ",
+      nativeAttachmentAuditFailed: "네이티브 도우미가 첨부파일을 완전하게 저장하지 못했습니다. 노트가 이미 생겼을 수 있지만 다음 요청 파일은 확인되지 않았습니다: ",
+      visualizeShareConfirm: "이 시각화를 Obsidian에 저장하기 위해 ChatGPT 공유링크를 생성하거나 기존 링크를 재사용합니다.\n\n선택 권한인 클립보드 읽기 권한을 요청합니다. 이번 시도의 '링크 복사' 동작 뒤 새 '복사됨' 표시가 확인된 경우에만 클립보드를 한 번 읽어 ChatGPT 공유 URL 하나인지 검증합니다. 읽은 값은 로그나 별도 저장소에 기록하거나 다른 곳으로 전송하지 않으며, 검증된 링크만 이 Obsidian 노트에 저장합니다. 권한이 거부되거나 자동 읽기가 불가능하면 확장 프로그램의 빈 입력칸에 링크를 직접 붙여넣도록 안내합니다.\n\n공유 설정에 따라 링크를 아는 사람이 공유된 내용을 볼 수 있습니다. 시각화 자체는 Vault에 복사되지 않으며 인터넷 연결과 ChatGPT 공유 페이지에 의존합니다.\n\n취소: 권한을 요청하거나 공유 버튼을 누르지 않고 아무 노트도 만들지 않음\n확인: 권한을 요청하고 현재 시각화 답변의 공유 UI만 자동 조작한 뒤 검증된 Visualize 요청 문맥을 저장",
+      visualizeConsentTitle: "공유 시각화 저장",
+      visualizeConsentContinue: "계속",
+      visualizeConsentCancel: "취소",
+      visualizeShareHeading: "시각화",
+      visualizeShareOpenLink: "ChatGPT에서 공유 시각화 열기",
+      directVisualizeRequestHeading: "시각화 요청",
+      directVisualizeExplanationHeading: "시각화 설명",
+      richAppShareHeading: "상호작용형 앱",
+      richAppShareOpenLink: "ChatGPT에서 공유 앱 열기",
+      richAppRequestHeading: "요청",
+      richAppExplanationHeading: "앱 설명",
+      richAppShareConfirm: "이 상호작용형 앱을 Obsidian에 저장하기 위해 ChatGPT 공유링크를 생성하거나 기존 링크를 재사용합니다.\n\n선택 권한인 클립보드 읽기 권한을 요청합니다. 이번 시도의 '링크 복사' 동작 뒤 새 '복사됨' 표시가 확인된 경우에만 클립보드를 한 번 읽어 ChatGPT 공유 URL 하나인지 검증합니다. 읽은 값은 로그나 별도 저장소에 기록하거나 다른 곳으로 전송하지 않으며, 검증된 링크만 이 Obsidian 노트에 저장합니다. 권한이 거부되거나 자동 읽기가 불가능하면 확장 프로그램의 빈 입력칸에 링크를 직접 붙여넣도록 안내합니다.\n\n앱 자체는 Vault에 복사되지 않으며 인터넷 연결과 ChatGPT 공유 페이지에 의존합니다.\n\n취소: 권한을 요청하거나 공유 버튼을 누르지 않고 아무 노트도 만들지 않음\n확인: 권한을 요청하고 현재 앱 응답의 공유 UI만 자동 조작한 뒤 검증된 공급자 중립 앱 문맥을 저장",
+      richAppConsentTitle: "공유 앱 저장",
+      richAppShareFailedPrefix: "공유 앱 저장이 {stage} 단계에서 중단되었습니다: {reason}",
+      richAppReferenceWarningTitle: "원격 앱 참조",
+      richAppReferenceWarningBody: "이 상호작용형 앱은 Vault에 저장된 로컬 파일이 아닙니다. 인터넷 연결과 ChatGPT 공유 페이지에 의존하며, 공유가 해제되거나 접근 정책이 바뀌면 열리지 않을 수 있습니다.",
+      visualizeShareReferenceWarningTitle: "원격 시각화 참조",
+      visualizeShareReferenceWarningBody: "시각화는 Vault에 저장된 로컬 파일이 아닙니다. 인터넷 연결과 ChatGPT 공유 페이지에 의존하며, 공유가 해제되거나 접근 정책이 바뀌면 열리지 않을 수 있습니다. 공유 설정에 따라 링크를 아는 사람이 접근할 수 있습니다.",
+      visualizeShareFailedPrefix: "Visualize 공유 저장이 {stage} 단계에서 중단되었습니다: {reason}",
+      visualizeManualShareTitle: "ChatGPT 공유링크 붙여넣기",
+      visualizeManualShareBody: "클립보드를 자동으로 읽을 수 없습니다. https://chatgpt.com/s/… 또는 https://chatgpt.com/share/… 링크 하나만 아래 빈 입력칸에 직접 붙여넣으세요.",
+      visualizeManualSharePlaceholder: "https://chatgpt.com/s/…",
+      visualizeManualShareSave: "이 링크 사용",
+      visualizeManualShareCancel: "취소",
+      visualizeManualShareInvalid: "올바른 ChatGPT 공유링크 하나만 입력하세요.",
+      visualizeShareCreatedButSaveFailed: "ChatGPT 공유링크는 생성됐지만 Obsidian 노트는 저장되지 않았습니다. 공유링크는 계속 활성 상태일 수 있습니다. 필요하면 ChatGPT 공유 화면에서 직접 공유를 해제하세요. 확장 프로그램은 자동으로 공유를 해제하지 않습니다.",
+      visualizeShareCreateAttemptUnverified: "ChatGPT 공유링크 생성 동작이 실행됐지만 공유 URL을 검증하지 못해 Obsidian 노트는 저장되지 않았습니다. 공유링크가 활성 상태일 수 있습니다. 필요하면 ChatGPT 공유 화면에서 확인한 뒤 직접 공유를 해제하세요. 확장 프로그램은 자동으로 공유를 해제하지 않습니다.",
+      conversationShareConfirm: "현재 답변에는 개별 응답 공유 기능이 없습니다.\n\n계속하면 이 시각화 답변 하나가 아니라 공유 시점까지의 대화 내용이 함께 공유될 수 있습니다. 이 전체 대화 공유링크를 Obsidian 노트에 저장합니다.\n\n취소: 공유 버튼을 누르거나 노트를 만들지 않음\n확인: 대화를 공유하고 검증된 대화 공유링크만 저장",
+      conversationShareConsentTitle: "전체 대화 공유링크 저장",
+      conversationShareUpdateConfirm: "기존 전체 대화 공유링크에 현재 시각화가 포함되지 않았을 수 있습니다. 현재 내용을 포함하도록 공유링크를 업데이트하시겠습니까?",
+      conversationShareHeading: "시각화",
+      conversationShareOpenLink: "시각화가 포함된 공유 대화 열기",
+      conversationShareWarningTitle: "전체 대화 공유 링크",
+      conversationShareWarningBody: "이 링크에는 현재 시각화만이 아니라 공유 시점까지의 대화 내용이 포함될 수 있습니다.",
+      conversationShareFailedPrefix: "전체 대화 공유 저장이 {stage} 단계에서 중단되었습니다: {reason}",
+      conversationShareChangedButSaveFailed: "전체 대화 공유링크가 생성되거나 업데이트됐지만 Obsidian 노트는 저장되지 않았습니다. 링크는 계속 활성 상태일 수 있습니다. 필요하면 ChatGPT에서 직접 공유를 관리하거나 해제하세요. 확장 프로그램은 자동으로 되돌리지 않습니다.",
+      conversationShareCopiedButSaveFailed: "전체 대화 공개링크가 클립보드에 복사됐지만 Obsidian 노트는 저장되지 않았습니다. 링크는 계속 활성 상태일 수 있습니다. 필요하면 ChatGPT에서 직접 공유 상태를 관리하거나 해제하세요. 확장 프로그램은 자동으로 해제하지 않습니다.",
+      conversationShareChangeAttemptUnverified: "전체 대화 공유 동작이 실행됐지만 URL을 검증하지 못해 Obsidian 노트는 저장되지 않았습니다. 링크가 활성 상태일 수 있습니다. ChatGPT 공유 화면에서 확인하고 필요하면 직접 관리하세요. 확장 프로그램은 자동으로 되돌리지 않습니다.",
       runtimeUnavailable: "extension runtime을 사용할 수 없습니다",
       runtimeDisconnectedRefresh: "확장 프로그램이 다시 로드되어 이 ChatGPT 탭의 연결이 끊겼습니다. 탭을 새로고침한 뒤 Obsidian 저장을 다시 눌러주세요."
     }
@@ -130,7 +227,7 @@
   function applySyncSettings(st) {
     settings.uiLanguage = normalizeLanguage(st.uiLanguage);
     settings.vaultName = st.vaultName || "";
-    settings.folderPath = st.folderPath || "ChatGPT";
+    settings.folderPath = st.folderPath === undefined ? "ChatGPT" : String(st.folderPath || "");
     settings.prefixDate = (st.prefixDate === undefined) ? true : st.prefixDate;
     settings.includeTime = !!st.includeTime;
     settings.keepQM = !!st.keepQM;
@@ -178,7 +275,11 @@
         updateInjectedButtonText();
       }
       if (changes.vaultName) settings.vaultName = changes.vaultName.newValue;
-      if (changes.folderPath) settings.folderPath = changes.folderPath.newValue;
+      if (changes.folderPath) {
+        settings.folderPath = changes.folderPath.newValue === undefined
+          ? "ChatGPT"
+          : String(changes.folderPath.newValue || "");
+      }
       if (changes.prefixDate) settings.prefixDate = changes.prefixDate.newValue;
       if (changes.includeTime) settings.includeTime = changes.includeTime.newValue;
       if (changes.keepQM) settings.keepQM = changes.keepQM.newValue;
@@ -235,7 +336,19 @@
     return JSON.stringify(String(value || ""));
   }
 
-  function buildMarkdown({title, questionText, answerText, url, attachmentMarker = ""}) {
+  function captureMetadataFrontmatterLines(captureMetadata = null) {
+    if (!captureMetadata || captureMetadata.captureStatus !== "partial") return [];
+    const expected = Math.max(0, Number(captureMetadata.richArtifactsExpected) || 0);
+    const complete = Math.max(0, Number(captureMetadata.richArtifactsComplete) || 0);
+    return [
+      "capture_status: partial",
+      `rich_artifacts_expected: ${expected}`,
+      `rich_artifacts_complete: ${complete}`,
+      "interactive_behavior_preserved: false"
+    ];
+  }
+
+  function buildMarkdown({title, questionText, answerText, url, attachmentMarker = "", captureMetadata = null}) {
     const created = nowIso();
     return [
       "---",
@@ -243,6 +356,7 @@
       `source: ${yamlQuote(url)}`,
       `created: ${yamlQuote(created)}`,
       "tags: [chatgpt, capture]",
+      ...captureMetadataFrontmatterLines(captureMetadata),
       "---",
       "",
       (settings && settings.bodyTitle ? `# ${title}` : ''),
@@ -258,7 +372,7 @@
     ].join("\n");
   }
 
-  function buildHtmlLearningMarkdown({title, questionText, answerText, url, attachmentMarker = "", useOriginalHeadings = true}) {
+  function buildHtmlLearningMarkdown({title, questionText, answerText, url, attachmentMarker = "", useOriginalHeadings = true, captureMetadata = null}) {
     const created = nowIso();
     const questionHeading = useOriginalHeadings ? t("originalQuestionHeading") : t("questionHeading");
     const answerHeading = useOriginalHeadings ? t("originalAnswerHeading") : t("answerHeading");
@@ -268,6 +382,7 @@
       `source: ${yamlQuote(url)}`,
       `created: ${yamlQuote(created)}`,
       "tags: [chatgpt, capture]",
+      ...captureMetadataFrontmatterLines(captureMetadata),
       "---",
       ""
     ];
@@ -290,13 +405,660 @@
     return lines.join("\n");
   }
 
+  function visualizeShareMetadata({sourceUrl = "", shareUrl = "", captureMode = "previous-qa-visualize-share-link", richArtifactsExpected = 1, richArtifactsRemoteReferenced = richArtifactsExpected} = {}) {
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    const remoteReferenced = Math.max(0, Math.min(expected, Number(richArtifactsRemoteReferenced) || 0));
+    return {
+      source: String(sourceUrl || ""),
+      visualizeShareUrl: normalizeChatGptShareUrl(shareUrl),
+      captureStatus: "remote-reference",
+      captureMode: String(captureMode || "previous-qa-visualize-share-link"),
+      richArtifactsExpected: expected,
+      richArtifactsLocalComplete: 0,
+      richArtifactsRemoteReferenced: remoteReferenced,
+      interactiveBehaviorPreserved: "remote-only",
+      offlineAvailable: false
+    };
+  }
+
+  function buildVisualizeShareReferenceWarning() {
+    return `> [!warning] ${t("visualizeShareReferenceWarningTitle")}\n> ${t("visualizeShareReferenceWarningBody")}`;
+  }
+
+  function buildVisualizeShareMarkdownDraft({
+    title,
+    sourceUrl,
+    questionText,
+    answerText,
+    richArtifactsExpected = 1,
+    captureMode = "previous-qa-visualize-share-link"
+  } = {}) {
+    const titleText = String(title || "").trim();
+    const sourceText = String(sourceUrl || "").trim();
+    const question = String(questionText || "").trim();
+    const answer = String(answerText || "").trim();
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    if (!titleText || !sourceText || !question || !answer) return "";
+    const lines = [
+      "---",
+      `title: ${yamlQuote(titleText)}`,
+      `source: ${yamlQuote(sourceText)}`,
+      'visualize_share_url: "{{validatedChatGptShareUrl}}"',
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, visualize, capture]",
+      "capture_status: remote-reference",
+      `capture_mode: ${String(captureMode || "previous-qa-visualize-share-link")}`,
+      `rich_artifacts_expected: ${expected}`,
+      "rich_artifacts_local_complete: 0",
+      `rich_artifacts_remote_referenced: ${expected}`,
+      "interactive_behavior_preserved: remote-only",
+      "offline_available: false",
+      "---",
+      "",
+      ...(settings && settings.bodyTitle ? [`# ${titleText}`, ""] : []),
+      `# ${t("visualizeShareHeading")}`,
+      "",
+      `[${t("visualizeShareOpenLink")}]({{validatedChatGptShareUrl}})`,
+      "",
+      buildVisualizeShareReferenceWarning(),
+      "",
+      `# ${t("originalQuestionHeading")}`,
+      "",
+      question,
+      "",
+      `# ${t("originalAnswerHeading")}`,
+      "",
+      answer
+    ];
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  function buildVisualizeShareMarkdown({
+    title,
+    sourceUrl,
+    shareUrl,
+    questionText,
+    answerText,
+    attachmentMarker = "",
+    richArtifactsExpected = 1,
+    richArtifactsRemoteReferenced = richArtifactsExpected,
+    captureMode = "previous-qa-visualize-share-link"
+  } = {}) {
+    const normalizedShareUrl = normalizeChatGptShareUrl(shareUrl);
+    if (!normalizedShareUrl) return "";
+    const metadata = visualizeShareMetadata({
+      sourceUrl,
+      shareUrl: normalizedShareUrl,
+      captureMode,
+      richArtifactsExpected,
+      richArtifactsRemoteReferenced
+    });
+    const created = nowIso();
+    const lines = [
+      "---",
+      `title: ${yamlQuote(title)}`,
+      `source: ${yamlQuote(metadata.source)}`,
+      `visualize_share_url: ${yamlQuote(metadata.visualizeShareUrl)}`,
+      `created: ${yamlQuote(created)}`,
+      "tags: [chatgpt, visualize, capture]",
+      `capture_status: ${metadata.captureStatus}`,
+      `capture_mode: ${metadata.captureMode}`,
+      `rich_artifacts_expected: ${metadata.richArtifactsExpected}`,
+      `rich_artifacts_local_complete: ${metadata.richArtifactsLocalComplete}`,
+      `rich_artifacts_remote_referenced: ${metadata.richArtifactsRemoteReferenced}`,
+      `interactive_behavior_preserved: ${metadata.interactiveBehaviorPreserved}`,
+      `offline_available: ${metadata.offlineAvailable}`,
+      "---",
+      ""
+    ];
+    if (settings && settings.bodyTitle) lines.push(`# ${title}`, "");
+    lines.push(
+      `# ${t("visualizeShareHeading")}`,
+      "",
+      `[${t("visualizeShareOpenLink")}](${metadata.visualizeShareUrl})`,
+      "",
+      buildVisualizeShareReferenceWarning(),
+      "",
+      `# ${t("originalQuestionHeading")}`,
+      "",
+      questionText || "",
+      "",
+      `# ${t("originalAnswerHeading")}`,
+      "",
+      answerText || "",
+      attachmentMarker || ""
+    );
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  function conversationShareMetadata({
+    sourceUrl = "",
+    shareUrl = "",
+    captureMode = "previous-qa-conversation-share-link",
+    targetTurnId = "",
+    shareInteraction = "",
+    conversationShareFreshness = "",
+    richArtifactsExpected = 1,
+    richArtifactsRemoteReferenced = richArtifactsExpected
+  } = {}) {
+    const normalizedShareUrl = validateStrictChatGptShareUrl(shareUrl);
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    const remoteReferenced = Math.max(0, Math.min(expected, Number(richArtifactsRemoteReferenced) || 0));
+    const source = String(sourceUrl || "").trim();
+    const target = String(targetTurnId || "").trim();
+    const interaction = /^(?:dialog|instant-copy)$/.test(String(shareInteraction || "").trim())
+      ? String(shareInteraction).trim()
+      : "";
+    const freshness = /^(?:verified|unverified)$/.test(String(conversationShareFreshness || "").trim())
+      ? String(conversationShareFreshness).trim()
+      : "";
+    if (!normalizedShareUrl || !source || !target) return null;
+    return {
+      source,
+      conversationShareUrl: normalizedShareUrl,
+      captureStatus: "remote-reference",
+      captureMode: String(captureMode || "previous-qa-conversation-share-link"),
+      shareScope: "conversation",
+      targetTurnId: target,
+      ...(interaction
+        ? { shareInteraction: interaction }
+        : {}),
+      ...(freshness
+        ? { conversationShareFreshness: freshness }
+        : {}),
+      richArtifactsExpected: expected,
+      richArtifactsLocalComplete: 0,
+      richArtifactsRemoteReferenced: remoteReferenced,
+      interactiveBehaviorPreserved: "remote-only",
+      offlineAvailable: false
+    };
+  }
+
+  function buildConversationShareWarning() {
+    return `> [!warning] ${t("conversationShareWarningTitle")}\n> ${t("conversationShareWarningBody")}`;
+  }
+
+  function conversationShareCaptureMode(bodyMode) {
+    if (bodyMode === "direct-visualize") return "direct-visualize-conversation-share-link";
+    if (bodyMode === "rich-app-continuation") return "rich-app-continuation-conversation-share-link";
+    return "previous-qa-conversation-share-link";
+  }
+
+  function buildConversationShareMarkdownDraft({
+    title,
+    sourceUrl,
+    bodyMode = "previous-qa",
+    questionText,
+    answerText = "",
+    explanationText = "",
+    targetTurnId = "",
+    richArtifactsExpected = 1
+  } = {}) {
+    const titleText = String(title || "").trim();
+    const sourceText = String(sourceUrl || "").trim();
+    const question = String(questionText || "").trim();
+    const answer = String(answerText || "").trim();
+    const explanation = String(explanationText || "").trim();
+    const target = String(targetTurnId || "").trim();
+    const mode = conversationShareCaptureMode(bodyMode);
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    if (!titleText || !sourceText || !question || !target) return "";
+    const lines = [
+      "---",
+      `title: ${yamlQuote(titleText)}`,
+      `source: ${yamlQuote(sourceText)}`,
+      'conversation_share_url: "{{validatedChatGptShareUrl}}"',
+      "capture_status: remote-reference",
+      `capture_mode: ${mode}`,
+      "share_scope: conversation",
+      `target_turn_id: ${yamlQuote(target)}`,
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, capture, conversation-share]",
+      `rich_artifacts_expected: ${expected}`,
+      "rich_artifacts_local_complete: 0",
+      `rich_artifacts_remote_referenced: ${expected}`,
+      "interactive_behavior_preserved: remote-only",
+      "offline_available: false",
+      "---",
+      "",
+      ...(settings && settings.bodyTitle ? [`# ${titleText}`, ""] : []),
+      `# ${t("conversationShareHeading")}`,
+      "",
+      `[${t("conversationShareOpenLink")}]({{validatedChatGptShareUrl}})`,
+      "",
+      buildConversationShareWarning()
+    ];
+    if (bodyMode === "direct-visualize") {
+      lines.push("", `# ${t("directVisualizeRequestHeading")}`, "", question);
+      if (explanation) lines.push("", `# ${t("directVisualizeExplanationHeading")}`, "", explanation);
+    } else if (bodyMode === "rich-app-continuation") {
+      lines.push("", `# ${t("richAppRequestHeading")}`, "", question);
+      if (explanation) lines.push("", `# ${t("richAppExplanationHeading")}`, "", explanation);
+    } else {
+      if (!answer) return "";
+      lines.push("", `# ${t("originalQuestionHeading")}`, "", question, "", `# ${t("originalAnswerHeading")}`, "", answer);
+    }
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  function buildConversationShareMarkdown({
+    title,
+    sourceUrl,
+    shareUrl,
+    bodyMode = "previous-qa",
+    questionText,
+    answerText = "",
+    explanationText = "",
+    targetTurnId = "",
+    attachmentMarker = "",
+    shareInteraction = "",
+    conversationShareFreshness = "",
+    richArtifactsExpected = 1,
+    richArtifactsRemoteReferenced = richArtifactsExpected
+  } = {}) {
+    const metadata = conversationShareMetadata({
+      sourceUrl,
+      shareUrl,
+      captureMode: conversationShareCaptureMode(bodyMode),
+      targetTurnId,
+      shareInteraction,
+      conversationShareFreshness,
+      richArtifactsExpected,
+      richArtifactsRemoteReferenced
+    });
+    const question = String(questionText || "").trim();
+    const answer = String(answerText || "").trim();
+    const explanation = String(explanationText || "").trim();
+    if (!metadata || !String(title || "").trim() || !question) return "";
+    if (bodyMode === "previous-qa" && !answer) return "";
+    const lines = [
+      "---",
+      `title: ${yamlQuote(title)}`,
+      `source: ${yamlQuote(metadata.source)}`,
+      `conversation_share_url: ${yamlQuote(metadata.conversationShareUrl)}`,
+      `capture_status: ${metadata.captureStatus}`,
+      `capture_mode: ${metadata.captureMode}`,
+      `share_scope: ${metadata.shareScope}`,
+      `target_turn_id: ${yamlQuote(metadata.targetTurnId)}`,
+      ...(metadata.shareInteraction ? [`share_interaction: ${metadata.shareInteraction}`] : []),
+      ...(metadata.conversationShareFreshness ? [`conversation_share_freshness: ${metadata.conversationShareFreshness}`] : []),
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, capture, conversation-share]",
+      `rich_artifacts_expected: ${metadata.richArtifactsExpected}`,
+      `rich_artifacts_local_complete: ${metadata.richArtifactsLocalComplete}`,
+      `rich_artifacts_remote_referenced: ${metadata.richArtifactsRemoteReferenced}`,
+      `interactive_behavior_preserved: ${metadata.interactiveBehaviorPreserved}`,
+      `offline_available: ${metadata.offlineAvailable}`,
+      "---",
+      ""
+    ];
+    if (settings && settings.bodyTitle) lines.push(`# ${title}`, "");
+    lines.push(
+      `# ${t("conversationShareHeading")}`,
+      "",
+      `[${t("conversationShareOpenLink")}](${metadata.conversationShareUrl})`,
+      "",
+      buildConversationShareWarning()
+    );
+    if (bodyMode === "direct-visualize") {
+      lines.push("", `# ${t("directVisualizeRequestHeading")}`, "", question);
+      if (explanation) lines.push("", `# ${t("directVisualizeExplanationHeading")}`, "", explanation);
+    } else if (bodyMode === "rich-app-continuation") {
+      lines.push("", `# ${t("richAppRequestHeading")}`, "", question);
+      if (explanation) lines.push("", `# ${t("richAppExplanationHeading")}`, "", explanation);
+    } else {
+      lines.push("", `# ${t("originalQuestionHeading")}`, "", question, "", `# ${t("originalAnswerHeading")}`, "", answer);
+    }
+    if (attachmentMarker) lines.push("", attachmentMarker);
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  function buildDirectVisualizeShareMarkdown({
+    title,
+    sourceUrl,
+    shareUrl,
+    questionText,
+    explanationText = "",
+    attachmentMarker = "",
+    richArtifactsExpected = 1,
+    richArtifactsRemoteReferenced = richArtifactsExpected
+  } = {}) {
+    const normalizedShareUrl = normalizeChatGptShareUrl(shareUrl);
+    const titleText = String(title || "").trim();
+    const sourceText = String(sourceUrl || "").trim();
+    const question = String(questionText || "").trim();
+    const explanation = String(explanationText || "").trim();
+    if (!normalizedShareUrl || !titleText || !sourceText || !question) return "";
+    const metadata = visualizeShareMetadata({
+      sourceUrl: sourceText,
+      shareUrl: normalizedShareUrl,
+      captureMode: "direct-visualize-share-link",
+      richArtifactsExpected,
+      richArtifactsRemoteReferenced
+    });
+    const lines = [
+      "---",
+      `title: ${yamlQuote(titleText)}`,
+      `source: ${yamlQuote(metadata.source)}`,
+      `visualize_share_url: ${yamlQuote(metadata.visualizeShareUrl)}`,
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, visualize, capture]",
+      `capture_status: ${metadata.captureStatus}`,
+      `capture_mode: ${metadata.captureMode}`,
+      `rich_artifacts_expected: ${metadata.richArtifactsExpected}`,
+      `rich_artifacts_local_complete: ${metadata.richArtifactsLocalComplete}`,
+      `rich_artifacts_remote_referenced: ${metadata.richArtifactsRemoteReferenced}`,
+      `interactive_behavior_preserved: ${metadata.interactiveBehaviorPreserved}`,
+      `offline_available: ${metadata.offlineAvailable}`,
+      "---",
+      ""
+    ];
+    if (settings && settings.bodyTitle) lines.push(`# ${titleText}`, "");
+    lines.push(
+      `# ${t("visualizeShareHeading")}`,
+      "",
+      `[${t("visualizeShareOpenLink")}](${metadata.visualizeShareUrl})`,
+      "",
+      buildVisualizeShareReferenceWarning(),
+      "",
+      `# ${t("directVisualizeRequestHeading")}`,
+      "",
+      question
+    );
+    if (explanation) {
+      lines.push("", `# ${t("directVisualizeExplanationHeading")}`, "", explanation);
+    }
+    if (attachmentMarker) lines.push("", attachmentMarker);
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  function buildDirectVisualizeShareMarkdownDraft({
+    title,
+    sourceUrl,
+    questionText,
+    explanationText = "",
+    richArtifactsExpected = 1
+  } = {}) {
+    const titleText = String(title || "").trim();
+    const sourceText = String(sourceUrl || "").trim();
+    const question = String(questionText || "").trim();
+    if (!titleText || !sourceText || !question) return "";
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    const explanation = String(explanationText || "").trim();
+    const lines = [
+      "---",
+      `title: ${yamlQuote(titleText)}`,
+      `source: ${yamlQuote(sourceText)}`,
+      'visualize_share_url: "{{validatedChatGptShareUrl}}"',
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, visualize, capture]",
+      "capture_status: remote-reference",
+      "capture_mode: direct-visualize-share-link",
+      `rich_artifacts_expected: ${expected}`,
+      "rich_artifacts_local_complete: 0",
+      `rich_artifacts_remote_referenced: ${expected}`,
+      "interactive_behavior_preserved: remote-only",
+      "offline_available: false",
+      "---",
+      ""
+    ];
+    if (settings && settings.bodyTitle) lines.push(`# ${titleText}`, "");
+    lines.push(
+      `# ${t("visualizeShareHeading")}`,
+      "",
+      `[${t("visualizeShareOpenLink")}]({{validatedChatGptShareUrl}})`,
+      "",
+      buildVisualizeShareReferenceWarning(),
+      "",
+      `# ${t("directVisualizeRequestHeading")}`,
+      "",
+      question
+    );
+    if (explanation) lines.push("", `# ${t("directVisualizeExplanationHeading")}`, "", explanation);
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  function buildRichAppContinuationShareMarkdownDraft({
+    title,
+    sourceUrl,
+    questionText,
+    explanationText = "",
+    richArtifactsExpected = 1
+  } = {}) {
+    const titleText = String(title || "").trim();
+    const sourceText = String(sourceUrl || "").trim();
+    const question = String(questionText || "").trim();
+    const explanation = String(explanationText || "").trim();
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    if (!titleText || !sourceText || !question) return "";
+    const lines = [
+      "---",
+      `title: ${yamlQuote(titleText)}`,
+      `source: ${yamlQuote(sourceText)}`,
+      'rich_app_share_url: "{{validatedChatGptShareUrl}}"',
+      "app_provider: unknown",
+      "app_provenance: unverified",
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, app, capture]",
+      "capture_status: remote-reference",
+      "capture_mode: rich-app-continuation-share-link",
+      `rich_artifacts_expected: ${expected}`,
+      "rich_artifacts_local_complete: 0",
+      `rich_artifacts_remote_referenced: ${expected}`,
+      "interactive_behavior_preserved: remote-only",
+      "offline_available: false",
+      "---",
+      ""
+    ];
+    if (settings && settings.bodyTitle) lines.push(`# ${titleText}`, "");
+    lines.push(
+      `# ${t("richAppShareHeading")}`,
+      "",
+      `[${t("richAppShareOpenLink")}]({{validatedChatGptShareUrl}})`,
+      "",
+      buildRichAppShareReferenceWarning(),
+      "",
+      `# ${t("richAppRequestHeading")}`,
+      "",
+      question
+    );
+    if (explanation) lines.push("", `# ${t("richAppExplanationHeading")}`, "", explanation);
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  function buildRichAppShareReferenceWarning() {
+    return `> [!warning] ${t("richAppReferenceWarningTitle")}\n> ${t("richAppReferenceWarningBody")}`;
+  }
+
+  function buildRichAppContinuationShareMarkdown({
+    title,
+    sourceUrl,
+    shareUrl,
+    questionText,
+    explanationText = "",
+    attachmentMarker = "",
+    richArtifactsExpected = 1,
+    richArtifactsRemoteReferenced = richArtifactsExpected
+  } = {}) {
+    const normalizedShareUrl = validateStrictChatGptShareUrl(shareUrl);
+    const titleText = String(title || "").trim();
+    const sourceText = String(sourceUrl || "").trim();
+    const question = String(questionText || "").trim();
+    const explanation = String(explanationText || "").trim();
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    const remoteReferenced = Math.max(0, Math.min(expected, Number(richArtifactsRemoteReferenced) || 0));
+    if (!normalizedShareUrl || !titleText || !sourceText || !question) return "";
+    const lines = [
+      "---",
+      `title: ${yamlQuote(titleText)}`,
+      `source: ${yamlQuote(sourceText)}`,
+      `rich_app_share_url: ${yamlQuote(normalizedShareUrl)}`,
+      "app_provider: unknown",
+      "app_provenance: unverified",
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, app, capture]",
+      "capture_status: remote-reference",
+      "capture_mode: rich-app-continuation-share-link",
+      `rich_artifacts_expected: ${expected}`,
+      "rich_artifacts_local_complete: 0",
+      `rich_artifacts_remote_referenced: ${remoteReferenced}`,
+      "interactive_behavior_preserved: remote-only",
+      "offline_available: false",
+      "---",
+      ""
+    ];
+    if (settings && settings.bodyTitle) lines.push(`# ${titleText}`, "");
+    lines.push(
+      `# ${t("richAppShareHeading")}`,
+      "",
+      `[${t("richAppShareOpenLink")}](${normalizedShareUrl})`,
+      "",
+      buildRichAppShareReferenceWarning(),
+      "",
+      `# ${t("richAppRequestHeading")}`,
+      "",
+      question
+    );
+    if (explanation) lines.push("", `# ${t("richAppExplanationHeading")}`, "", explanation);
+    if (attachmentMarker) lines.push(attachmentMarker);
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  async function prepareVisualizeSharePreflight({
+    currentAssistantNode,
+    previousQa,
+    visualizeContext = null,
+    sourceUrl = location.href,
+    btn = null,
+    runtimeGuard = null,
+    artifactContainer = null,
+    fileLinks = null,
+    artifactRows = null,
+    readableFiles = undefined,
+    nativePreflightFn = pingNativeHelper,
+    nativePreflightOptions = {}
+  } = {}) {
+    if (!currentAssistantNode) return { ok: false, stage: "preflight", reason: "current assistant node was not found" };
+    const mode = visualizeContext?.mode || "previous-qa";
+    const isRichAppContinuation = mode === "rich-app-continuation";
+    const resolvedPreviousQa = mode === "previous-qa" ? (previousQa || visualizeContext) : null;
+    const requestNode = mode === "direct-visualize"
+      ? visualizeContext?.visualizeRequestNode
+      : isRichAppContinuation
+        ? visualizeContext?.requestNode
+        : resolvedPreviousQa?.requestNode || resolvedPreviousQa?.visualizeRequestNode;
+    const questionText = mode === "direct-visualize" || isRichAppContinuation
+      ? visualizeContext?.questionText
+      : resolvedPreviousQa?.questionText;
+    const answerText = mode === "direct-visualize" || isRichAppContinuation
+      ? ""
+      : resolvedPreviousQa?.answerText;
+    if (mode === "direct-visualize") {
+      if (!visualizeContext?.visualizeAnswerNode || visualizeContext.visualizeAnswerNode !== currentAssistantNode ||
+          !visualizeContext?.visualizeRequestNode || !questionText ||
+          !isExplicitVisualizeRequestNode(visualizeContext.visualizeRequestNode)) {
+        return { ok: false, stage: "preflight", reason: "direct Visualize context could not be resolved" };
+      }
+    } else if (isRichAppContinuation) {
+      if (!visualizeContext?.currentAppAnswerNode || visualizeContext.currentAppAnswerNode !== currentAssistantNode ||
+          !visualizeContext?.previousAppAnswerNode ||
+          !visualizeContext?.requestNode || !questionText || visualizeContext.provider !== "unknown" ||
+          !collectRichAppBlockCandidates(visualizeContext.previousAppAnswerNode).length) {
+        return { ok: false, stage: "preflight", reason: "rich app continuation context could not be resolved" };
+      }
+    } else if (!questionText || !answerText || !resolvedPreviousQa?.requestNode || !resolvedPreviousQa?.answerNode) {
+      return { ok: false, stage: "preflight", reason: "Q1/A1/Q2 could not be resolved" };
+    }
+    if (!isRichAppContinuation && !isVisualizeShareCandidate(currentAssistantNode, { requestNode })) {
+      return { ok: false, stage: "preflight", reason: "the response is not a structurally identified Visualize app block" };
+    }
+    if (runtimeGuard?.check) {
+      const runtimeStatus = await checkRuntimeGuard(runtimeGuard, "visualize-preflight");
+      if (!runtimeStatus?.ok) return { ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" };
+    }
+    const nativeStatus = await nativePreflightFn("visualize-preflight", {
+      ...nativePreflightOptions,
+      runtimeGuard
+    });
+    if (!nativeStatus?.ok) {
+      return { ok: false, stage: "native-preflight", reason: nativeStatus?.error || "Native helper unavailable" };
+    }
+
+    const container = artifactContainer || (btn ? closestArtifactContainer(btn) : currentAssistantNode) || currentAssistantNode;
+    const resolvedFileLinks = Array.isArray(fileLinks)
+      ? fileLinks
+      : collectFileLikeLinks(container);
+    const resolvedArtifactRows = Array.isArray(artifactRows)
+      ? artifactRows
+      : collectArtifactFileRows(container, FILE_DELIVERABLE_EXTENSIONS);
+    let resolvedReadableFiles = Array.isArray(readableFiles) ? readableFiles : [];
+    if (readableFiles === undefined) {
+      const expectedNames = Array.from(new Set([
+        ...resolvedFileLinks.map(item => item?.name || ""),
+        ...resolvedArtifactRows.map(item => item?.name || "")
+      ].filter(name => /\.html?$/i.test(name))));
+      resolvedReadableFiles = await readHtmlPreviews(container, expectedNames, []);
+    }
+    const fileIntegrity = assessArtifactIntegrity({
+      fileLinks: resolvedFileLinks,
+      artifactRows: resolvedArtifactRows,
+      attachments: resolvedReadableFiles,
+      downloadedAttachments: [],
+      generatedMarkdown: {},
+      failures: []
+    });
+    const localRichExpected = mode === "previous-qa"
+      ? collectRichAppBlockCandidates(resolvedPreviousQa.answerNode, { idPrefix: "a1-rich" })
+      : [];
+    const localRichIntegrity = assessRichArtifactIntegrity({ expected: localRichExpected, captures: [] });
+    const remoteRichExpected = collectRichAppBlockCandidates(currentAssistantNode, { idPrefix: "a2-rich" });
+    const remoteRichIntegrity = assessRichArtifactIntegrity({ expected: remoteRichExpected, captures: [] });
+    const richArtifactsExpected = remoteRichExpected.length;
+    const explanationText = mode === "direct-visualize" || isRichAppContinuation
+      ? extractDirectVisualizeExplanation(currentAssistantNode)
+      : "";
+    const title = makeTitle(questionText || answerText);
+    const filePath = buildFilePath(title);
+    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    const targetTurnId = String(currentTurn?.getAttribute?.("data-turn-id") || "").trim();
+    const markdown = mode === "direct-visualize"
+      ? buildDirectVisualizeShareMarkdownDraft({ title, sourceUrl, questionText, explanationText, richArtifactsExpected })
+      : isRichAppContinuation
+        ? buildRichAppContinuationShareMarkdownDraft({ title, sourceUrl, questionText, explanationText, richArtifactsExpected })
+        : buildVisualizeShareMarkdownDraft({ title, sourceUrl, questionText, answerText, richArtifactsExpected });
+    if (!title || !filePath || !markdown) {
+      return { ok: false, stage: "preflight", reason: "title, note path, or Markdown could not be assembled" };
+    }
+    return {
+      ok: true,
+      artifactContainer: container,
+      fileLinks: resolvedFileLinks,
+      artifactRows: resolvedArtifactRows,
+      readableFiles: resolvedReadableFiles,
+      fileIntegrity,
+      localRichExpected,
+      localRichIntegrity,
+      remoteRichExpected,
+      remoteRichIntegrity,
+      richArtifactsExpected,
+      mode,
+      questionText,
+      answerText,
+      explanationText,
+      targetTurnId,
+      title,
+      filePath,
+      markdown
+    };
+  }
+
   function buildFilePath(title) {
     const date = formatDate();
     const time = new Date();
     const pad = (n)=>String(n).padStart(2,"0");
     const hhmmss = `${pad(time.getHours())}-${pad(time.getMinutes())}-${pad(time.getSeconds())}`;
     const datePrefix = settings.prefixDate ? (settings.includeTime ? `${date} ${hhmmss} - ` : `${date} - `) : "";
-    const folder = (settings.folderPath || "ChatGPT").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const folder = String(settings.folderPath || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
     const fileBase = sanitizeFileName(`${datePrefix}${title}`);
     return (folder ? `${folder}/` : "") + fileBase + ".md";
   }
@@ -326,6 +1088,10 @@
     if (last && now - last < ttlMs) return true;
     recent.set(key, now);
     return false;
+  }
+
+  function clearContentSaveReservation(key) {
+    state.recentSaves.delete(key);
   }
 
   function openObsidianURIDirectly(uri) {
@@ -365,7 +1131,7 @@
     openObsidianURIDirectly(uri);
   }
 
-  async function saveObsidianNote({vaultName, vaultPath, filePath, content, attachments, downloadedAttachments, downloadedMarkdown, attachmentNames, htmlSaveDir, fallbackUri}, options = {}) {
+  async function saveObsidianNote({vaultName, vaultPath, filePath, content, attachments, downloadedAttachments, downloadedMarkdown, attachmentNames, allowPartialAttachments = false, htmlSaveDir, fallbackUri}, options = {}) {
     const runtimeGuard = options.runtimeGuard || null;
     const sender = options.sendMessage || sendExtensionMessage;
     const openUri = options.openUri || openObsidianURIDirectly;
@@ -405,7 +1171,7 @@
     const response = await awaitWithRuntimeGuard(
       sender({
         type: "save-obsidian-note",
-        payload: { vaultName, vaultPath, filePath, content, attachments, downloadedAttachments, downloadedMarkdown, attachmentNames, htmlSaveDir, fallbackUri, htmlCodeBlockReplacementText: t("htmlAttachmentSavedLine") }
+        payload: { vaultName, vaultPath, filePath, content, attachments, downloadedAttachments, downloadedMarkdown, attachmentNames, allowPartialAttachments, htmlSaveDir, fallbackUri, htmlCodeBlockReplacementText: t("htmlAttachmentSavedLine") }
       }, { phase: "native-save" }),
       runtimeGuard,
       "native-save-wait"
@@ -424,6 +1190,22 @@
 
     if (Array.isArray(response.warnings) && response.warnings.length) {
       showAlert(t("generatedArtifactWarningPrefix") + response.warnings.join("\n"));
+    }
+    if (!allowPartialAttachments && Array.isArray(attachmentNames) && attachmentNames.length) {
+      const writtenRequestedNames = Array.isArray(response.attachmentAudit?.writtenRequestedNames)
+        ? response.attachmentAudit.writtenRequestedNames
+        : Array.isArray(response.attachments)
+          ? response.attachments.map(item => item?.requestedName || item?.name || "")
+          : [];
+      const writtenKeys = new Set(writtenRequestedNames.map(artifactNameKey));
+      const missing = Array.from(new Set(attachmentNames
+        .map(name => safeArtifactName(name, ["html", "htm"]))
+        .filter(name => !writtenKeys.has(artifactNameKey(name)))));
+      if (missing.length) {
+        const message = t("nativeAttachmentAuditFailed") + missing.slice(0, 12).join(", ");
+        showAlert(message);
+        return { ...response, ok: false, error: "native-attachment-audit-incomplete", missingAttachments: missing };
+      }
     }
     return response;
   }
@@ -552,6 +1334,144 @@
     });
   }
 
+  function isPluginMentionContext(node) {
+    if (!node?.closest) return false;
+    return !!node.closest([
+      "[data-id^='plugin:']",
+      "[data-plugin-id]",
+      "[data-inline-selection-pill]",
+      "[data-testid*='plugin' i]"
+    ].join(","));
+  }
+
+  function isDecorativeContentImage(node) {
+    const src = String(node?.getAttribute?.("src") || "").trim();
+    if (/(?:^|\/\/)www\.google\.com\/s2\/favicons\b|favicon/i.test(src)) return true;
+    if (!src || !isPluginMentionContext(node)) return false;
+    try {
+      const url = new URL(src, location.href);
+      return url.hostname === "chatgpt.com" && /^\/images\/[^/?#]+\/app-blocks-[^/?#]+\.svg$/i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  }
+
+  function nodesIncludingRoot(root, selector) {
+    if (!root) return [];
+    const nodes = [];
+    if (root.matches?.(selector)) nodes.push(root);
+    if (root.querySelectorAll) nodes.push(...Array.from(root.querySelectorAll(selector)));
+    return Array.from(new Set(nodes));
+  }
+
+  function isVisualizePluginId(value) {
+    const text = String(value || "").trim().toLowerCase();
+    return text === "plugin:visualize" || /(?:^|[:/_-])visualize(?:$|[:/_-])/.test(text);
+  }
+
+  function isVisualizePluginMention(node) {
+    if (!node) return false;
+    const dataId = String(node.getAttribute?.("data-id") || "").trim();
+    const dataPluginId = String(node.getAttribute?.("data-plugin-id") || "").trim();
+    if (dataId.toLowerCase() === "plugin:visualize" || isVisualizePluginId(dataPluginId)) return true;
+
+    const iconNodes = nodesIncludingRoot(node, "img, svg, [data-src]");
+    for (const icon of iconNodes) {
+      const rawSrc = String(
+        icon.getAttribute?.("src") ||
+        icon.getAttribute?.("data-src") ||
+        icon.getAttribute?.("href") ||
+        ""
+      ).trim();
+      if (!rawSrc) continue;
+      try {
+        const iconUrl = new URL(rawSrc, location.href);
+        if (iconUrl.hostname === "chatgpt.com" && iconUrl.pathname === "/images/visualize/app-blocks-visualize.svg") {
+          return true;
+        }
+      } catch {}
+    }
+
+    const label = [
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("title") || "",
+      node.innerText || node.textContent || ""
+    ].join(" ").replace(/\s+/g, " ").trim();
+    return /\bvisualize\b/i.test(label);
+  }
+
+  function isVisualizeRequestNode(node) {
+    if (!node) return false;
+    const mentionSelector = [
+      "[data-id^='plugin:']",
+      "[data-plugin-id]",
+      "[data-inline-selection-pill]",
+      "[data-testid*='plugin' i]"
+    ].join(",");
+    const mentions = nodesIncludingRoot(node, mentionSelector);
+    return mentions.some(isVisualizePluginMention);
+  }
+
+  function hasEarlierAssistantResponseVariant(currentAssistantNode) {
+    const currentTurn = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || null;
+    const turnRoot = currentTurn || currentAssistantNode;
+    if (!turnRoot?.querySelectorAll) return false;
+    return nodesIncludingRoot(turnRoot, "button, [role='button']").some(control => {
+      const label = String(control.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
+      if (!/^(?:previous response|이전 응답)$/i.test(label)) return false;
+      if (!isVisibleEnabledControl(control)) return false;
+      const controlTurn = control.closest?.("[data-testid^='conversation-turn-']") || null;
+      return !currentTurn || controlTurn === currentTurn;
+    });
+  }
+
+  function isVisualizeRequestForAssistant(requestNode, currentAssistantNode) {
+    if (isVisualizeRequestNode(requestNode)) return true;
+    const requestText = String(requestNode?.innerText || requestNode?.textContent || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return /^@?visualize$/i.test(requestText) &&
+      hasEarlierAssistantResponseVariant(currentAssistantNode);
+  }
+
+  function isVisualizeShareCandidate(currentAssistantNode, previousQa) {
+    return collectRichAppBlockCandidates(currentAssistantNode).length > 0 &&
+      isVisualizeRequestForAssistant(previousQa?.requestNode, currentAssistantNode);
+  }
+
+  function removeUnsupportedRichAppBlocks(root) {
+    const blocks = nodesIncludingRoot(root, '[data-app-block-preview="true"]');
+    blocks.forEach(block => block.remove?.());
+    return blocks.length;
+  }
+
+  function isInsideUnsupportedRichAppBlock(node) {
+    return !!node?.closest?.('[data-app-block-preview="true"]');
+  }
+
+  function hasNonRichSelectorMatch(container, selector) {
+    if (!container) return false;
+    const first = container.querySelector?.(selector) || null;
+    if (first && !isInsideUnsupportedRichAppBlock(first)) return true;
+    if (!first && typeof container.querySelector === "function") return false;
+    return Array.from(container.querySelectorAll?.(selector) || [])
+      .some(node => !isInsideUnsupportedRichAppBlock(node));
+  }
+
+  function normalizeFileCitationChips(root) {
+    const chips = nodesIncludingRoot(root, "[data-file-citation-primary-source]");
+    chips.forEach(chip => {
+      const displayName = String(chip.innerText || chip.textContent || "").replace(/\s+/g, " ").trim();
+      if (!displayName || typeof chip.replaceWith !== "function") return;
+      const replacement = document.createElement("span");
+      replacement.setAttribute?.("data-gpt2obs-source-file", "true");
+      replacement.textContent = `${t("sourceFileDisplayName")}${displayName}`;
+      chip.replaceWith(replacement);
+    });
+    return chips.length;
+  }
+
   // ---------- HTML → Markdown (lightweight) ----------
   function htmlToMarkdown(html) {
     const el = document.createElement("div");
@@ -559,11 +1479,6 @@
 
     function escapeMd(s) {
       return s.replace(/([*_`~])/g, "\\$1");
-    }
-
-    function isDecorativeImage(node) {
-      const src = node.getAttribute?.("src") || "";
-      return /(?:^|\/\/)www\.google\.com\/s2\/favicons\b|favicon/i.test(src);
     }
 
     function stripDecorativeMarkdownImages(text) {
@@ -733,8 +1648,13 @@
         case "td":
           return child();
         case "a": {
-          const href = node.getAttribute("href") || "";
+          const href = String(node.getAttribute("href") || "").trim();
           const text = stripDecorativeMarkdownImages(child()) || href;
+          // ChatGPT can render generated-file controls as anchors without an
+          // href and keep the real destination only in a React click handler.
+          // Markdown has no equivalent for that hidden handler, so preserve
+          // the label as plain text instead of manufacturing `[name]()`.
+          if (!href) return text;
           return `[${text}](${href})`;
         }
         case "h1":
@@ -786,7 +1706,7 @@
         case "img": {
           const alt = node.getAttribute("alt") || "";
           const src = node.getAttribute("src") || "";
-          if (isDecorativeImage(node)) return "";
+          if (isDecorativeContentImage(node)) return "";
           return `![${alt}](${src})`;
         }
       }
@@ -877,6 +1797,8 @@
     const container = closestMessageContainer(btn);
     if (!container) return "";
     const clone = container.cloneNode(true);
+    normalizeFileCitationChips(clone);
+    removeUnsupportedRichAppBlocks(clone);
     removeNonAnswerChrome(clone);
     return clone.innerHTML;
   }
@@ -884,6 +1806,8 @@
   function messageNodeToPlainText(node) {
     if (!node) return "";
     const clone = node.cloneNode(true);
+    normalizeFileCitationChips(clone);
+    removeUnsupportedRichAppBlocks(clone);
     removePreviousQaMarkdownChrome(clone);
     const markdown = htmlToMarkdown(clone.innerHTML || "");
     if (markdown && markdown.length >= 3) return markdown.trim();
@@ -893,6 +1817,8 @@
   function assistantNodeToMarkdown(node) {
     if (!node) return "";
     const clone = node.cloneNode(true);
+    normalizeFileCitationChips(clone);
+    removeUnsupportedRichAppBlocks(clone);
     removePreviousQaMarkdownChrome(clone);
     const md = htmlToMarkdown(clone.innerHTML || "");
     return stripChatGptFooterLines(cleanAnswerText(repairFencedCodeBlocks(md || "")));
@@ -925,6 +1851,262 @@
     };
   }
 
+  // Direct Visualize saves are intentionally resolved separately from the
+  // legacy Q1/A1 finder.  The latter is also used by ordinary and HTML
+  // captures, so changing its meaning would make a missing/virtualized Q1/A1
+  // pair look like a valid direct capture.
+  function isExplicitVisualizeRequestNode(node) {
+    if (!node) return false;
+    const idNodes = nodesIncludingRoot(node, "[data-id], [data-plugin-id]");
+    if (idNodes.some(candidate => {
+      const dataId = String(candidate.getAttribute?.("data-id") || "").trim();
+      const pluginId = String(candidate.getAttribute?.("data-plugin-id") || "").trim();
+      return dataId.toLowerCase() === "plugin:visualize" || isVisualizePluginId(pluginId);
+    })) return true;
+
+    const iconNodes = nodesIncludingRoot(node, "img, svg, [data-src]");
+    return iconNodes.some(icon => {
+      const rawSrc = String(
+        icon.getAttribute?.("src") ||
+        icon.getAttribute?.("data-src") ||
+        icon.getAttribute?.("href") ||
+        ""
+      ).trim();
+      if (!rawSrc) return false;
+      try {
+        const iconUrl = new URL(rawSrc, location.href);
+        return iconUrl.hostname === "chatgpt.com" && iconUrl.pathname === "/images/visualize/app-blocks-visualize.svg";
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function visualizeRequestNodeToPlainText(node) {
+    if (!node) return "";
+    let source = node;
+    try {
+      const clone = node.cloneNode?.(true);
+      if (clone && clone !== node) {
+        nodesIncludingRoot(clone, "[data-id='plugin:visualize'], [data-plugin-id], [data-inline-selection-pill]")
+          .forEach(mention => mention.remove?.());
+        source = clone;
+      }
+    } catch {}
+    return cleanQuestionText(messageNodeToPlainText(source));
+  }
+
+  function extractDirectVisualizeExplanation(node) {
+    if (!node) return "";
+    try {
+      const clone = node.cloneNode?.(true);
+      if (clone && clone !== node) {
+        removeUnsupportedRichAppBlocks(clone);
+        removePreviousQaMarkdownChrome(clone);
+        const markdown = htmlToMarkdown(clone.innerHTML || "");
+        return stripChatGptFooterLines(cleanAnswerText(repairFencedCodeBlocks(markdown || "")));
+      }
+    } catch {}
+    // Test doubles and a few lightweight DOM wrappers return themselves from
+    // cloneNode(); use their already-scoped text without mutating the live app
+    // block in that case.
+    return stripChatGptFooterLines(cleanAnswerText(String(node.innerText || node.textContent || "").trim()));
+  }
+
+  function getVerifiedConversationTurnEntries() {
+    const roots = Array.from(document.querySelectorAll?.("[data-testid^='conversation-turn-']") || []);
+    const topLevelRoots = roots.filter(root => !roots.some(other => (
+      other !== root && other.contains?.(root) && other.matches?.("[data-testid^='conversation-turn-']")
+    )));
+    const entries = [];
+
+    topLevelRoots.forEach((turn, order) => {
+      const declaredRole = String(turn.getAttribute?.("data-turn") || "").trim().toLowerCase();
+      if (declaredRole && declaredRole !== "user" && declaredRole !== "assistant") return;
+      const roleNodes = nodesIncludingRoot(turn, "[data-message-author-role]");
+      const qaRoleNodes = roleNodes.filter(node => {
+        const role = roleAttrForNode(node);
+        return role === "user" || role === "assistant";
+      });
+
+      if (declaredRole === "user" || declaredRole === "assistant") {
+        if (qaRoleNodes.length !== 1 || roleAttrForNode(qaRoleNodes[0]) !== declaredRole) {
+          entries.push({ turn, order, ambiguous: true, role: "" });
+          return;
+        }
+        entries.push({ turn, order, ambiguous: false, role: declaredRole, node: qaRoleNodes[0] });
+        return;
+      }
+
+      if (qaRoleNodes.length === 1) {
+        entries.push({ turn, order, ambiguous: false, role: roleAttrForNode(qaRoleNodes[0]), node: qaRoleNodes[0] });
+      } else if (qaRoleNodes.length > 1) {
+        entries.push({ turn, order, ambiguous: true, role: "" });
+      }
+    });
+    return entries;
+  }
+
+  function resolveVisualizeSaveContext(currentAssistantNode) {
+    const unresolved = reason => ({ mode: "unresolved", reason });
+    if (!currentAssistantNode) return unresolved("current assistant node was not found");
+    if (roleAttrForNode(currentAssistantNode) !== "assistant") {
+      return unresolved("current node is not an assistant turn");
+    }
+
+    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    if (!currentTurn) return unresolved("current assistant conversation turn was not found");
+    const richAnswer = collectRichAppBlockCandidates(currentAssistantNode);
+    if (!richAnswer.length) return unresolved("current assistant has no rich Visualize app block");
+
+    const entries = getVerifiedConversationTurnEntries();
+    const currentIndex = entries.findIndex(entry => entry.turn === currentTurn);
+    if (currentIndex < 0) return unresolved("current assistant turn could not be resolved");
+    const currentEntry = entries[currentIndex];
+    if (currentEntry.ambiguous || currentEntry.role !== "assistant" || currentEntry.node !== currentAssistantNode) {
+      return unresolved("current assistant turn is ambiguous");
+    }
+
+    const earlierEntries = entries.slice(0, currentIndex);
+    const q2 = [...earlierEntries].reverse().find(entry => entry.role === "user" && !entry.ambiguous);
+    if (!q2) return unresolved("Visualize request turn could not be resolved");
+    const betweenQ2AndA2 = entries.slice(earlierEntries.indexOf(q2) + 1, currentIndex);
+    if (betweenQ2AndA2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return unresolved("Q2 and A2 correspondence is ambiguous");
+    }
+
+    const visualizeRequestForPreviousQa = isVisualizeRequestForAssistant(q2.node, currentAssistantNode);
+    const explicitVisualizeRequest = isExplicitVisualizeRequestNode(q2.node);
+    if (!visualizeRequestForPreviousQa) return unresolved("the preceding user turn is not a Visualize request");
+
+    const priorAssistants = earlierEntries.filter(entry => entry.role === "assistant" && !entry.ambiguous);
+    if (priorAssistants.length) {
+      const a1 = priorAssistants[priorAssistants.length - 1];
+      const a1Index = entries.indexOf(a1);
+      const betweenA1AndQ2 = entries.slice(a1Index + 1, entries.indexOf(q2));
+      if (betweenA1AndQ2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+        return unresolved("Q1/A1 and Q2 candidates are ambiguous");
+      }
+      const priorUsers = entries.slice(0, a1Index).filter(entry => entry.role === "user" && !entry.ambiguous);
+      const q1 = priorUsers[priorUsers.length - 1];
+      if (!q1) return unresolved("Q1 could not be resolved before A1");
+      const q1Index = entries.indexOf(q1);
+      const betweenQ1AndA1 = entries.slice(q1Index + 1, a1Index);
+      if (betweenQ1AndA1.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+        return unresolved("Q1/A1 correspondence is ambiguous");
+      }
+      const questionText = cleanQuestionText(messageNodeToPlainText(q1.node));
+      const renderedAnswer = assistantNodeToMarkdown(a1.node);
+      const answerText = stripChatGptFooterLines(cleanAnswerText(repairFencedCodeBlocks(
+        renderedAnswer || String(a1.node.innerText || a1.node.textContent || "")
+      )));
+      if (!questionText || !answerText) return unresolved("Q1 or A1 Markdown is empty");
+      return {
+        mode: "previous-qa",
+        questionNode: q1.node,
+        answerNode: a1.node,
+        visualizeRequestNode: q2.node,
+        visualizeAnswerNode: currentAssistantNode,
+        questionText,
+        answerText,
+        visualizeRequestText: visualizeRequestNodeToPlainText(q2.node)
+      };
+    }
+
+    // A direct capture is valid only when the DOM proves that there was no
+    // earlier real user/assistant exchange at all. Any earlier QA candidate or
+    // ambiguous role is treated as a possible missing/virtualized pair.
+    const entriesBeforeQ2 = entries.slice(0, entries.indexOf(q2));
+    if (entriesBeforeQ2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return unresolved("an earlier Q1/A1 candidate exists; direct mode is unsafe");
+    }
+    if (!explicitVisualizeRequest) return unresolved("direct mode requires an explicit Visualize plugin marker");
+    const questionText = visualizeRequestNodeToPlainText(q2.node);
+    if (!questionText) return unresolved("Visualize request Markdown is empty");
+    return {
+      mode: "direct-visualize",
+      questionNode: null,
+      answerNode: null,
+      visualizeRequestNode: q2.node,
+      visualizeAnswerNode: currentAssistantNode,
+      questionText,
+      answerText: "",
+      visualizeRequestText: questionText
+    };
+  }
+
+  // ChatGPT may serialize a follow-up action from an interactive app as an
+  // ordinary user turn without retaining the original plugin mention. Keep
+  // that topology separate from the strict Visualize resolver: a continuation
+  // is provider-neutral and is admitted only when the DOM proves A0(app) ->
+  // Q2(user) -> A2(app) with no intervening real Q/A turns.
+  function resolveRichAppContinuationContext(currentAssistantNode) {
+    const unresolved = reason => ({ mode: "unresolved", reason });
+    if (!currentAssistantNode) return unresolved("current assistant node was not found");
+    if (roleAttrForNode(currentAssistantNode) !== "assistant") {
+      return unresolved("current node is not an assistant turn");
+    }
+
+    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    if (!currentTurn) return unresolved("current assistant conversation turn was not found");
+    if (!collectRichAppBlockCandidates(currentAssistantNode).length) {
+      return unresolved("current assistant has no rich app block");
+    }
+
+    const entries = getVerifiedConversationTurnEntries();
+    const currentMatches = entries.filter(entry => entry.turn === currentTurn);
+    if (currentMatches.length !== 1) return unresolved("current assistant turn is missing or duplicated");
+    const currentIndex = entries.indexOf(currentMatches[0]);
+    if (currentIndex < 0 || currentMatches[0].ambiguous || currentMatches[0].role !== "assistant" || currentMatches[0].node !== currentAssistantNode) {
+      return unresolved("current assistant turn is ambiguous");
+    }
+
+    const earlierEntries = entries.slice(0, currentIndex);
+    const q2 = [...earlierEntries].reverse().find(entry => entry.role === "user" && !entry.ambiguous);
+    if (!q2) return unresolved("continuation request turn could not be resolved");
+    if (isVisualizeRequestForAssistant(q2.node, currentAssistantNode)) {
+      return unresolved("request has explicit Visualize provenance; use the strict Visualize resolver");
+    }
+    const pluginMentionSelector = [
+      "[data-id^='plugin:']",
+      "[data-plugin-id]",
+      "[data-inline-selection-pill]",
+      "[data-testid*='plugin' i]"
+    ].join(",");
+    if (nodesIncludingRoot(q2.node, pluginMentionSelector).length) {
+      return unresolved("request has plugin provenance; continuation provider is not unknown");
+    }
+    const q2Index = entries.indexOf(q2);
+    const betweenQ2AndA2 = entries.slice(q2Index + 1, currentIndex);
+    if (betweenQ2AndA2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return unresolved("continuation Q2 and A2 correspondence is ambiguous");
+    }
+
+    const a0 = [...entries.slice(0, q2Index)].reverse().find(entry => entry.role === "assistant" && !entry.ambiguous);
+    if (!a0) return unresolved("previous app answer turn could not be resolved");
+    const a0Index = entries.indexOf(a0);
+    const betweenA0AndQ2 = entries.slice(a0Index + 1, q2Index);
+    if (betweenA0AndQ2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return unresolved("continuation A0 and Q2 correspondence is ambiguous");
+    }
+    if (!collectRichAppBlockCandidates(a0.node).length) {
+      return unresolved("previous assistant turn has no rich app block");
+    }
+
+    const questionText = cleanQuestionText(messageNodeToPlainText(q2.node));
+    if (!questionText) return unresolved("continuation request Markdown is empty");
+    return {
+      mode: "rich-app-continuation",
+      previousAppAnswerNode: a0.node,
+      requestNode: q2.node,
+      currentAppAnswerNode: currentAssistantNode,
+      // The live DOM supplies no trustworthy provider marker for this path.
+      provider: "unknown",
+      questionText,
+      visualizeRequestText: questionText
+    };
+  }
+
   function htmlOrClipboardToMarkdown(btn, clipboardText, preferClipboard = false) {
     const html = extractAssistantMessageHTML(btn);
     if (html) {
@@ -942,6 +2124,1342 @@
         return encoded;
       }
     });
+  }
+
+  function normalizeChatGptShareUrl(raw) {
+    const value = String(raw || "").trim();
+    if (!value || /\s/.test(value)) return "";
+    if (/^\/\//.test(value)) return "";
+    if (/^https:\/\//i.test(value) && !/^https:\/\/chatgpt\.com\//i.test(value)) return "";
+    let url;
+    try {
+      url = new URL(value, "https://chatgpt.com");
+    } catch {
+      return "";
+    }
+    if (url.protocol !== "https:" || url.hostname !== "chatgpt.com" || url.port || url.username || url.password || url.search || url.hash) {
+      return "";
+    }
+    if (!/^\/(?:s|share)\/[^/?#]+$/i.test(url.pathname)) return "";
+    return url.href;
+  }
+
+  function validateStrictChatGptShareUrl(raw) {
+    const value = String(raw || "").trim();
+    if (!value || /\s/.test(value) || !/^https:\/\/chatgpt\.com\//.test(value)) return "";
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      return "";
+    }
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== "chatgpt.com" ||
+      url.port ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      !/^\/(?:s|share)\/[^/?#]+$/i.test(url.pathname)
+    ) {
+      return "";
+    }
+    return url.href;
+  }
+
+  function extractValidatedChatGptShareUrl(dialog) {
+    if (!dialog) return "";
+    const candidates = [];
+    const add = value => {
+      const text = String(value || "").trim();
+      if (text) candidates.push(text);
+    };
+    const isVisible = node => elementVisibilityDetails(node).visible;
+
+    for (const node of nodesIncludingRoot(dialog, "input, textarea")) {
+      if (!isVisible(node)) continue;
+      add(node.value);
+      add(node.getAttribute?.("value"));
+    }
+    for (const node of nodesIncludingRoot(dialog, "a[href]")) {
+      if (!isVisible(node)) continue;
+      add(node.getAttribute?.("href") || node.href);
+    }
+    for (const node of nodesIncludingRoot(dialog, "[data-share-url], [data-share-link], [data-url]")) {
+      if (!isVisible(node)) continue;
+      add(node.getAttribute?.("data-share-url"));
+      add(node.getAttribute?.("data-share-link"));
+      add(node.getAttribute?.("data-url"));
+    }
+    const dialogText = isVisible(dialog)
+      ? String(dialog.innerText || dialog.textContent || "")
+      : "";
+    const textMatches = dialogText.match(/https?:\/\/[^\s<>'"`]+/gi) || [];
+    textMatches.forEach(add);
+
+    const validated = new Set();
+    for (const candidate of candidates) {
+      const normalized = normalizeChatGptShareUrl(candidate.replace(/[),.;!?]+$/g, ""));
+      if (normalized) validated.add(normalized);
+    }
+    return validated.size === 1 ? Array.from(validated)[0] : "";
+  }
+
+  function getShareSurfaceCandidates(root = document) {
+    const scope = root || document;
+    return nodesIncludingRoot(scope, [
+      "[role='dialog']",
+      "dialog",
+      "[role='menu']",
+      "[role='region']",
+      "[aria-modal='true']",
+      "[data-testid*='share-dialog' i]",
+      "[data-testid*='share-sheet' i]",
+      "[data-testid*='share-popover' i]",
+      "[data-side]"
+    ].join(","));
+  }
+
+  // Some ChatGPT builds use the conversation header Share button as an
+  // immediate-copy shortcut when a public conversation link already exists.
+  // That outcome is not a share surface and must therefore be observed by a
+  // separate, narrowly scoped signal detector rather than by broadening the
+  // generic share-surface selector above.
+  function isWholeConversationShareCopySuccessText(value) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) return false;
+    return /공개\s*링크가\s*클립보드에\s*복사(?:되었습니다|됐습니다|되었|됨)/i.test(text) &&
+      /이\s*링크가\s*있으면\s*누구나\s*이\s*대화를\s*볼\s*수\s*있습니다/i.test(text);
+  }
+
+  function conversationShareCopySignalEntries(root = document) {
+    const candidates = nodesIncludingRoot(root || document, "[role='status'], [role='alert'], [aria-live]")
+      .filter(node => node?.isConnected !== false)
+      .filter(node => !node?.closest?.("[data-testid^='conversation-turn-']"))
+      .filter(node => elementVisibilityDetails(node).visible);
+    const entries = [];
+    const seen = new Set();
+    for (const node of candidates) {
+      const text = String(node?.innerText || node?.textContent || "").replace(/\s+/g, " ").trim();
+      if (!isWholeConversationShareCopySuccessText(text) || seen.has(node)) continue;
+      seen.add(node);
+      entries.push({
+        node,
+        role: String(node?.getAttribute?.("role") || ""),
+        ariaLive: String(node?.getAttribute?.("aria-live") || ""),
+        text,
+        signature: JSON.stringify({
+          role: String(node?.getAttribute?.("role") || ""),
+          ariaLive: String(node?.getAttribute?.("aria-live") || ""),
+          text
+        })
+      });
+    }
+    return entries;
+  }
+
+  function isConversationShareAccessibilityMirror(entry) {
+    const node = entry?.node;
+    if (!node?.classList?.contains?.("sr-only")) return false;
+    const role = String(entry?.role || node.getAttribute?.("role") || "").trim().toLowerCase();
+    const ariaLive = String(entry?.ariaLive || node.getAttribute?.("aria-live") || "").trim().toLowerCase();
+    return (role === "status" || role === "alert") && (ariaLive === "polite" || ariaLive === "assertive");
+  }
+
+  function canonicalizeConversationShareCopySignals(entries = []) {
+    const candidates = Array.from(entries || []);
+    if (candidates.length !== 2) return candidates;
+    const mirrors = candidates.filter(isConversationShareAccessibilityMirror);
+    const visualSignals = candidates.filter(entry => !isConversationShareAccessibilityMirror(entry));
+    if (mirrors.length !== 1 || visualSignals.length !== 1) return candidates;
+    return [{
+      ...visualSignals[0],
+      accessibilityMirror: mirrors[0].node,
+      semanticSignature: "whole-conversation-public-link-copied"
+    }];
+  }
+
+  function captureConversationShareCopySignals(root = document) {
+    return conversationShareCopySignalEntries(root);
+  }
+
+  function getVisibleShareDialogs(root = document) {
+    return getShareSurfaceCandidates(root)
+      .filter(surface => shareSurfaceVisibilityDetails(surface).visible);
+  }
+
+  function shareSurfaceVisibilityDetails(surface) {
+    const base = elementVisibilityDetails(surface);
+    const stateClosed = /^(?:closed|hidden)$/i.test(String(surface?.getAttribute?.("data-state") || ""));
+    const ariaHidden = /^true$/i.test(String(surface?.getAttribute?.("aria-hidden") || ""));
+    const explicitlyHidden = surface?.hidden === true || surface?.hasAttribute?.("hidden");
+    return {
+      ...base,
+      stateClosed,
+      ariaHidden,
+      explicitlyHidden,
+      visible: base.visible && !stateClosed && !ariaHidden && !explicitlyHidden
+    };
+  }
+
+  function isCopyShareLinkControl(node) {
+    if (!isVisibleEnabledControl(node)) return false;
+    const marker = [
+      node.getAttribute?.("data-testid") || "",
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("title") || "",
+      node.innerText || "",
+      node.textContent || "",
+      controlLabel(node)
+    ].join(" ").replace(/\s+/g, " ").trim();
+    return /(?:copy\s*(?:share\s*)?link|(?:share\s*)?link\s*copy|링크\s*복사|공유\s*링크\s*복사)/i.test(marker);
+  }
+
+  function findCopyShareLinkButton(surface) {
+    if (!surface?.querySelectorAll) return null;
+    const controls = nodesIncludingRoot(surface, "button, [role='button'], [role='menuitem']")
+      .filter(isCopyShareLinkControl);
+    return controls.length === 1 ? controls[0] : null;
+  }
+
+  function isCopySuccessText(value) {
+    const text = String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return !!text && (
+      /(?:^|\b)(?:copied|link copied|copy complete|copy successful)(?:\b|$)/i.test(text) ||
+      /(?:복사됨|복사 완료|링크가 복사|복사되었|복사됐|클립보드.{0,20}복사)/.test(text)
+    );
+  }
+
+  function copySuccessEntries(surface, control) {
+    const candidates = new Set();
+    if (control?.isConnected !== false && (!surface?.contains || surface.contains(control))) candidates.add(control);
+    nodesIncludingRoot(surface, "button, [role='button'], [role='status'], [aria-live]")
+      .forEach(node => candidates.add(node));
+    const entries = [];
+    for (const node of candidates) {
+      if (!elementVisibilityDetails(node).visible) continue;
+      const channels = [
+        ["aria-label", node.getAttribute?.("aria-label") || ""],
+        ["title", node.getAttribute?.("title") || ""],
+        ["innerText", node.innerText || ""],
+        ["textContent", node.textContent || ""]
+      ];
+      const seen = new Set();
+      for (const [channel, rawValue] of channels) {
+        const value = String(rawValue || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const key = `${channel}\u0000${value}`;
+        if (!value || seen.has(key) || !isCopySuccessText(value)) continue;
+        seen.add(key);
+        entries.push({ node, channel, value });
+      }
+    }
+    return entries;
+  }
+
+  function captureCopySuccessState(surface, control, options = {}) {
+    const surfaces = new Set([surface]);
+    if (typeof options.getDialogs === "function") {
+      try {
+        for (const candidate of Array.from(options.getDialogs() || [])) {
+          if (shareSurfaceVisibilityDetails(candidate).visible) surfaces.add(candidate);
+        }
+      } catch {}
+    }
+    return {
+      entries: copySuccessEntries(surface, control),
+      surface,
+      surfaces: Array.from(surfaces).map(candidate => ({
+        surface: candidate,
+        entries: copySuccessEntries(candidate, candidate === surface ? control : null)
+      }))
+    };
+  }
+
+  async function waitForCopySuccess(surface, control, options = {}) {
+    const beforeEntries = Array.from(options.beforeState?.entries || []);
+    const beforeSurfaces = Array.from(options.beforeState?.surfaces || []);
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, options.timeoutMs) : 3000;
+    const schedule = options.setTimeout || setTimeout;
+    const cancelTimer = options.clearTimeout || clearTimeout;
+    const mutationObserverClass = options.MutationObserver || globalThis.MutationObserver;
+    return new Promise(resolve => {
+      let settled = false;
+      let timeoutTimer = null;
+      let observer = null;
+      const cleanup = () => {
+        if (timeoutTimer !== null) cancelTimer(timeoutTimer);
+        try { observer?.disconnect?.(); } catch {}
+        timeoutTimer = null;
+        observer = null;
+      };
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+      const inspect = () => {
+        if (settled) return;
+        let activeSurface = surface;
+        if (typeof options.getDialogs === "function") {
+          const eligible = collapseNestedShareSurfaces(Array.from(options.getDialogs() || [])
+            .filter(candidate => shareSurfaceVisibilityDetails(candidate).visible)
+            .filter(candidate => classifyShareSurface(candidate) === "final" || copySuccessEntries(candidate, null).length > 0)
+            .map(node => ({ node })))
+            .map(item => item.node);
+          if (eligible.length > 1) {
+            finish({ ok: false, stage: "share-dialog", reason: "multiple visible share surfaces during Copy link confirmation" });
+            return;
+          }
+          if (eligible.length === 1) activeSurface = eligible[0];
+        }
+        const surfaceBefore = beforeSurfaces.find(snapshot => snapshot?.surface === activeSurface);
+        const activeBeforeEntries = surfaceBefore
+          ? Array.from(surfaceBefore.entries || [])
+          : activeSurface === options.beforeState?.surface
+            ? beforeEntries
+            : [];
+        const currentEntries = copySuccessEntries(activeSurface, control);
+        const hasFreshEntry = currentEntries.some(entry => !activeBeforeEntries.some(before => (
+          before.node === entry.node && before.channel === entry.channel && before.value === entry.value
+        )));
+        if (hasFreshEntry) {
+          finish({ ok: true, stage: "copy-success", surface: activeSurface });
+        }
+      };
+      try {
+        const observationRoot = options.root?.documentElement || surface?.ownerDocument?.documentElement || surface;
+        if (typeof mutationObserverClass === "function" && observationRoot?.nodeType) {
+          observer = new mutationObserverClass(inspect);
+          observer.observe(observationRoot, { childList: true, subtree: true, attributes: true, characterData: true });
+        }
+      } catch {}
+      timeoutTimer = schedule(() => finish({ ok: false, stage: "copy-success", reason: "copy success signal was not observed" }), timeoutMs);
+      inspect();
+    });
+  }
+
+  function isUpdateShareLinkControl(node) {
+    if (!isVisibleEnabledShareAction(node)) return false;
+    const marker = [
+      node.getAttribute?.("data-testid") || "",
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("title") || "",
+      controlLabel(node)
+    ].join(" ").replace(/\s+/g, " ").trim();
+    return /(?:update\s*(?:share\s*)?link|(?:share\s*)?link\s*update|링크\s*업데이트|공유\s*링크\s*업데이트)/i.test(marker);
+  }
+
+  function hasExistingShareSurfaceStructure(surface) {
+    if (!surface?.querySelectorAll) return false;
+    const controls = nodesIncludingRoot(surface, "button, [role='button']");
+    const copyControls = controls.filter(isCopyShareLinkControl);
+    const updateControls = controls.filter(isUpdateShareLinkControl);
+    const closeControls = controls.filter(node => shareDialogControlScore(node, "close") >= 0);
+    const socialControls = controls.filter(node => /^(?:x|twitter|linkedin|reddit|facebook|whatsapp|email|메일)$/i.test(controlLabel(node)));
+    const existingLinkControls = copyControls.length + updateControls.length;
+    return existingLinkControls >= 1 && existingLinkControls <= 2 && (closeControls.length === 1 || socialControls.length >= 2);
+  }
+
+  function isLikelyShareDialog(dialog) {
+    if (!dialog) return false;
+    return !!extractValidatedChatGptShareUrl(dialog) ||
+      !!findCreateShareLinkButton(dialog) ||
+      hasExistingShareSurfaceStructure(dialog);
+  }
+
+  function shareDialogControlScore(node, kind) {
+    if (!isVisibleEnabledControl(node)) return -1;
+    const values = [
+      node.getAttribute?.("data-testid") || "",
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("title") || "",
+      controlLabel(node)
+    ].map(value => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    const marker = values.join(" ");
+    const isCreate = /(?:create\s*(?:a\s*)?(?:share\s*)?link|make\s*(?:a\s*)?link|generate\s*(?:a\s*)?link|링크\s*(?:만들기|생성)|공유\s*링크\s*(?:만들기|생성))/i.test(marker);
+    const isClose = /(?:^|[\s_-])(?:close|닫기)(?:$|[\s_-])/i.test(marker) || /^(?:close|닫기)$/i.test(marker);
+    if (kind === "create" && !isCreate) return -1;
+    if (kind === "close" && !isClose) return -1;
+    let score = 20;
+    if (/(?:create|make|share).*(?:link|url)|(?:link|url).*(?:create|make|share)|(?:링크|공유).*(?:만들기|생성)/i.test(String(node.getAttribute?.("data-testid") || ""))) score += 100;
+    if (kind === "close" && /close|닫기/i.test(String(node.getAttribute?.("data-testid") || ""))) score += 100;
+    if (/^(?:create\s*(?:a\s*)?(?:share\s*)?link|make\s*(?:a\s*)?link|generate\s*(?:a\s*)?link|링크\s*(?:만들기|생성)|공유\s*링크\s*(?:만들기|생성))$/i.test(controlLabel(node))) score += 40;
+    if (kind === "close" && /^(?:close|닫기)$/i.test(controlLabel(node))) score += 40;
+    return score;
+  }
+
+  function findShareDialogControl(dialog, kind) {
+    if (!dialog?.querySelectorAll) return null;
+    const controls = nodesIncludingRoot(dialog, "button, [role='button']");
+    const scored = controls
+      .map((node, index) => ({ node, index, score: shareDialogControlScore(node, kind) }))
+      .filter(item => item.score >= 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+    if (!scored.length) return null;
+    if (scored.length > 1 && scored[0].score === scored[1].score) return null;
+    return scored[0].node;
+  }
+
+  function findCreateShareLinkButton(dialog) {
+    return findShareDialogControl(dialog, "create");
+  }
+
+  function findCloseShareDialogButton(dialog) {
+    return findShareDialogControl(dialog, "close");
+  }
+
+  function intermediateShareActionScore(node) {
+    if (!isVisibleEnabledShareAction(node)) return -1;
+    const marker = [
+      node.getAttribute?.("data-testid") || "",
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("title") || "",
+      controlLabel(node)
+    ].join(" ").replace(/\s+/g, " ").trim();
+    if (/(?:copy|복사|create|make|generate|만들기|생성|update|업데이트|delete|remove|삭제|close|닫기)/i.test(marker)) return -1;
+    if (!/(?:^|[\s_-])(?:share|공유|공유하기)(?:$|[\s_-])/i.test(marker)) return -1;
+    let score = 20;
+    if (/share/i.test(String(node.getAttribute?.("data-testid") || ""))) score += 100;
+    if (/^(?:share|share link|공유|공유하기|공유 링크)$/i.test(controlLabel(node))) score += 50;
+    return score;
+  }
+
+  function findIntermediateShareAction(surface) {
+    if (!surface?.querySelectorAll) return { control: null, ambiguous: false, count: 0 };
+    const scored = nodesIncludingRoot(surface, "button, [role='button'], [role='menuitem']")
+      .map((node, index) => ({ node, index, score: intermediateShareActionScore(node) }))
+      .filter(item => item.score >= 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+    if (!scored.length) return { control: null, ambiguous: false, count: 0 };
+    if (scored.length > 1) {
+      return { control: null, ambiguous: true, count: scored.length };
+    }
+    return { control: scored[0].node, ambiguous: false, count: scored.length };
+  }
+
+  function isIntermediateShareSurface(surface) {
+    const role = String(surface?.getAttribute?.("role") || "").toLowerCase();
+    const testId = String(surface?.getAttribute?.("data-testid") || "");
+    const popoverLike = role === "menu" || /(?:popover|menu)/i.test(testId) || surface?.hasAttribute?.("data-side");
+    return popoverLike && findIntermediateShareAction(surface).count > 0;
+  }
+
+  function classifyShareSurface(surface) {
+    if (!surface) return "";
+    if (extractValidatedChatGptShareUrl(surface) || findCreateShareLinkButton(surface) || hasExistingShareSurfaceStructure(surface)) {
+      return "final";
+    }
+    if (isIntermediateShareSurface(surface)) return "intermediate";
+    return "";
+  }
+
+  function collapseNestedShareSurfaces(items) {
+    const list = Array.from(items || []);
+    return list.filter(item => !list.some(other => (
+      other !== item &&
+      item?.node?.contains?.(other?.node)
+    )));
+  }
+
+  function captureShareSurfaceSnapshot(surface) {
+    const visibility = shareSurfaceVisibilityDetails(surface);
+    const controls = nodesIncludingRoot(surface, "button, [role='button']");
+    const markerCounts = {
+      create: controls.filter(node => shareDialogControlScore(node, "create") >= 0).length,
+      close: controls.filter(node => shareDialogControlScore(node, "close") >= 0).length,
+      copy: controls.filter(isCopyShareLinkControl).length,
+      update: controls.filter(isUpdateShareLinkControl).length
+    };
+    const state = {
+      visible: visibility.visible,
+      role: String(surface?.getAttribute?.("role") || ""),
+      ariaHidden: String(surface?.getAttribute?.("aria-hidden") || ""),
+      ariaModal: String(surface?.getAttribute?.("aria-modal") || ""),
+      dataState: String(surface?.getAttribute?.("data-state") || ""),
+      hasValidatedShareUrl: !!extractValidatedChatGptShareUrl(surface),
+      controlCount: controls.length,
+      markerCounts
+    };
+    return { node: surface, ...state, signature: JSON.stringify(state) };
+  }
+
+  function captureShareSurfaceSnapshots(surfaces) {
+    return Array.from(surfaces || []).map(captureShareSurfaceSnapshot);
+  }
+
+  async function waitForRelevantShareDialog(beforeDialogs = [], options = {}) {
+    const root = options.root || document;
+    const beforeSnapshots = new Map();
+    Array.from(beforeDialogs || []).forEach(item => {
+      const snapshot = item?.node ? item : captureShareSurfaceSnapshot(item);
+      if (snapshot?.node) beforeSnapshots.set(snapshot.node, snapshot);
+    });
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, options.timeoutMs) : SHARE_DIALOG_TIMEOUT_MS;
+    const pollMs = Number.isFinite(options.pollMs) ? Math.max(1, options.pollMs) : SHARE_POLL_MS;
+    const getDialogs = options.getDialogs || (() => getShareSurfaceCandidates(root));
+    const nowFn = options.now || (() => Date.now());
+    const schedule = options.setTimeout || setTimeout;
+    const cancelTimer = options.clearTimeout || clearTimeout;
+    const mutationObserverClass = options.MutationObserver || globalThis.MutationObserver;
+    const startedAt = nowFn();
+    const deadline = startedAt + timeoutMs;
+    artifactDebugLog("observer-root", {
+      tag: String((root?.documentElement || root)?.tagName || "document").toUpperCase(),
+      role: String((root?.documentElement || root)?.getAttribute?.("role") || ""),
+      testId: String((root?.documentElement || root)?.getAttribute?.("data-testid") || "").slice(0, 120),
+      observesDocumentElement: !!root?.documentElement
+    });
+
+    return new Promise(resolve => {
+      let settled = false;
+      let checking = false;
+      let pollTimer = null;
+      let timeoutTimer = null;
+      let observer = null;
+
+      const cleanup = () => {
+        if (pollTimer !== null) cancelTimer(pollTimer);
+        if (timeoutTimer !== null) cancelTimer(timeoutTimer);
+        try { observer?.disconnect?.(); } catch {}
+        pollTimer = null;
+        timeoutTimer = null;
+        observer = null;
+      };
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+      const inspect = async () => {
+        if (settled || checking) return;
+        checking = true;
+        try {
+          if (options.runtimeGuard?.isAborted?.()) {
+            finish({ ok: false, stage: "runtime", reason: options.runtimeGuard.getFailure?.()?.error || "runtime unavailable" });
+            return;
+          }
+          if (options.runtimeGuard?.check) {
+            const runtimeStatus = await checkRuntimeGuard(options.runtimeGuard, "share-dialog-wait");
+            if (!runtimeStatus?.ok) {
+              finish({ ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" });
+              return;
+            }
+          }
+          const dialogs = collapseNestedShareSurfaces(Array.from(getDialogs() || [])
+            .map(captureShareSurfaceSnapshot)
+            .filter(snapshot => snapshot.visible)
+            .filter(snapshot => {
+              const previous = beforeSnapshots.get(snapshot.node);
+              return !previous || !previous.visible || previous.signature !== snapshot.signature;
+            })
+            .map(snapshot => ({ node: snapshot.node, kind: classifyShareSurface(snapshot.node) }))
+            .filter(item => !!item.kind));
+          if (dialogs.length) {
+            artifactDebugLog("visible-top-layer-after", {
+              count: dialogs.length,
+              surfaces: dialogs.slice(0, 6).map(item => ({ kind: item.kind, ...shareSurfaceDiagnostic(item.node) }))
+            });
+          }
+          if (dialogs.length === 1) {
+            finish({ ok: true, dialog: dialogs[0].node, surface: dialogs[0].node, kind: dialogs[0].kind });
+            return;
+          }
+          if (dialogs.length > 1) {
+            finish({ ok: false, stage: "share-dialog", reason: "multiple new visible share dialogs" });
+            return;
+          }
+          if (nowFn() >= deadline) {
+            finish({ ok: false, stage: "share-dialog", reason: "timed out waiting for a visible share surface state change" });
+            return;
+          }
+        } catch (error) {
+          finish({ ok: false, stage: "share-dialog", reason: error?.message || String(error) });
+          return;
+        } finally {
+          checking = false;
+        }
+        if (!settled) pollTimer = schedule(inspect, pollMs);
+      };
+
+      try {
+        const observationRoot = root?.documentElement || root;
+        if (typeof mutationObserverClass === "function" && observationRoot?.nodeType) {
+          observer = new mutationObserverClass(() => { void inspect(); });
+          observer.observe(observationRoot, { childList: true, subtree: true, attributes: true });
+        }
+      } catch {}
+      timeoutTimer = schedule(() => {
+        finish({ ok: false, stage: "share-dialog", reason: "timed out waiting for a visible share surface state change" });
+      }, timeoutMs);
+      void inspect();
+    });
+  }
+
+  // Conversation-level Share has two UI contracts in the wild: a dialog/menu
+  // surface, or an existing public link copied directly to the clipboard. The
+  // latter exposes only a fresh, strongly worded status message. Keep this
+  // outcome resolver separate from waitForRelevantShareDialog() so response
+  // shares and generic toasts never inherit conversation-wide semantics.
+  async function waitForConversationShareOutcome({
+    shareKind = "conversation",
+    beforeSurfaces = [],
+    beforeCopySignals = [],
+    root = document,
+    runtimeGuard = null,
+    getDialogs = null,
+    timeoutMs,
+    pollMs,
+    now,
+    setTimeout: setTimer = setTimeout,
+    clearTimeout: clearTimer = clearTimeout,
+    MutationObserver: MutationObserverClass = globalThis.MutationObserver
+  } = {}) {
+    if (shareKind !== "conversation") {
+      return {
+        ok: false,
+        kind: "unresolved",
+        stage: "share-dialog",
+        reason: "conversation share outcome requires shareKind=conversation"
+      };
+    }
+    const scope = root || document;
+    const surfaceSnapshots = new Map();
+    Array.from(beforeSurfaces || []).forEach(item => {
+      const snapshot = item?.node ? item : captureShareSurfaceSnapshot(item);
+      if (snapshot?.node) surfaceSnapshots.set(snapshot.node, snapshot);
+    });
+    const copySignalSnapshots = new Map();
+    Array.from(beforeCopySignals || []).forEach(item => {
+      const node = item?.node || item;
+      if (!node) return;
+      const snapshot = item?.signature ? item : conversationShareCopySignalEntries(scope).find(entry => entry.node === node);
+      if (snapshot?.node) copySignalSnapshots.set(snapshot.node, snapshot);
+    });
+    const timeout = Number.isFinite(timeoutMs) ? Math.max(1, timeoutMs) : SHARE_DIALOG_TIMEOUT_MS;
+    const interval = Number.isFinite(pollMs) ? Math.max(1, pollMs) : SHARE_POLL_MS;
+    const getSurfaceNodes = getDialogs || (() => getShareSurfaceCandidates(scope));
+    const nowFn = now || (() => Date.now());
+    const startedAt = nowFn();
+    const deadline = startedAt + timeout;
+
+    return new Promise(resolve => {
+      let settled = false;
+      let checking = false;
+      let pollTimer = null;
+      let timeoutTimer = null;
+      let observer = null;
+      const cleanup = () => {
+        if (pollTimer !== null) clearTimer(pollTimer);
+        if (timeoutTimer !== null) clearTimer(timeoutTimer);
+        try { observer?.disconnect?.(); } catch {}
+        pollTimer = null;
+        timeoutTimer = null;
+        observer = null;
+      };
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+      const inspect = async () => {
+        if (settled || checking) return;
+        checking = true;
+        try {
+          if (runtimeGuard?.isAborted?.()) {
+            finish({ ok: false, kind: "unresolved", stage: "runtime", reason: runtimeGuard.getFailure?.()?.error || "runtime unavailable" });
+            return;
+          }
+          if (runtimeGuard?.check) {
+            const runtimeStatus = await checkRuntimeGuard(runtimeGuard, "conversation-share-outcome-wait");
+            if (!runtimeStatus?.ok) {
+              finish({ ok: false, kind: "unresolved", stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" });
+              return;
+            }
+          }
+
+          const surfaces = collapseNestedShareSurfaces(Array.from(getSurfaceNodes() || [])
+            .map(captureShareSurfaceSnapshot)
+            .filter(snapshot => snapshot.visible)
+            .filter(snapshot => {
+              const previous = surfaceSnapshots.get(snapshot.node);
+              return !previous || !previous.visible || previous.signature !== snapshot.signature;
+            })
+            .map(snapshot => ({ node: snapshot.node, surfaceKind: classifyShareSurface(snapshot.node) }))
+            .filter(item => !!item.surfaceKind));
+          const rawSignals = conversationShareCopySignalEntries(scope)
+            .filter(entry => {
+              const previous = copySignalSnapshots.get(entry.node);
+              return !previous || previous.signature !== entry.signature;
+            });
+          const signals = canonicalizeConversationShareCopySignals(rawSignals);
+
+          if (surfaces.length > 1 || signals.length > 1 || (surfaces.length && signals.length)) {
+            let ambiguitySubtype = "";
+            let reason = "";
+            if (surfaces.length > 1 && signals.length > 0) {
+              ambiguitySubtype = "multiple-surfaces-with-copy-signals";
+              reason = "multiple fresh conversation share surfaces appeared with copy signals";
+            } else if (surfaces.length > 1) {
+              ambiguitySubtype = "multiple-surfaces";
+              reason = "multiple fresh conversation share surfaces";
+            } else if (signals.length > 1 && surfaces.length > 0) {
+              ambiguitySubtype = "surface-with-multiple-copy-signals";
+              reason = "a conversation share surface appeared with multiple fresh copy signals";
+            } else if (signals.length > 1) {
+              ambiguitySubtype = "multiple-copy-signals";
+              reason = "multiple fresh conversation share copy signals";
+            } else {
+              ambiguitySubtype = "surface-and-copy-signal";
+              reason = "a conversation share surface and copy signal appeared together";
+            }
+            finish({
+              ok: false,
+              kind: "unresolved",
+              stage: "share-dialog",
+              reason,
+              ambiguitySubtype,
+              surfaceCount: surfaces.length,
+              copySignalCount: signals.length,
+              rawCopySignalCount: rawSignals.length
+            });
+            return;
+          }
+          if (surfaces.length === 1) {
+            finish({
+              ok: true,
+              kind: "surface",
+              surface: surfaces[0].node,
+              dialog: surfaces[0].node,
+              surfaceKind: surfaces[0].surfaceKind
+            });
+            return;
+          }
+          if (signals.length === 1) {
+            finish({ ok: true, kind: "instant-copy", signal: signals[0] });
+            return;
+          }
+          if (nowFn() >= deadline) {
+            finish({
+              ok: false,
+              kind: "unresolved",
+              stage: "share-dialog",
+              reason: "timed out waiting for a conversation share surface or fresh copy signal"
+            });
+            return;
+          }
+        } catch (error) {
+          finish({ ok: false, kind: "unresolved", stage: "share-dialog", reason: error?.message || String(error) });
+          return;
+        } finally {
+          checking = false;
+        }
+        if (!settled) pollTimer = setTimer(inspect, interval);
+      };
+
+      try {
+        const observationRoot = scope?.documentElement || scope;
+        if (typeof MutationObserverClass === "function" && observationRoot?.nodeType) {
+          observer = new MutationObserverClass(() => { void inspect(); });
+          observer.observe(observationRoot, { childList: true, subtree: true, attributes: true, characterData: true });
+        }
+      } catch {}
+      timeoutTimer = setTimer(() => finish({
+        ok: false,
+        kind: "unresolved",
+        stage: "share-dialog",
+        reason: "timed out waiting for a conversation share surface or fresh copy signal"
+      }), timeout);
+      void inspect();
+    });
+  }
+
+  async function waitForValidatedShareUrl(dialog, options = {}) {
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, options.timeoutMs) : SHARE_URL_TIMEOUT_MS;
+    const pollMs = Number.isFinite(options.pollMs) ? Math.max(1, options.pollMs) : SHARE_POLL_MS;
+    const wait = options.sleep || (ms => sleep(ms));
+    const nowFn = options.now || (() => Date.now());
+    const deadline = nowFn() + timeoutMs;
+    while (nowFn() <= deadline) {
+      if (options.runtimeGuard?.isAborted?.()) {
+        return { ok: false, stage: "runtime", reason: options.runtimeGuard.getFailure?.()?.error || "runtime unavailable" };
+      }
+      if (options.runtimeGuard?.check) {
+        const runtimeStatus = await checkRuntimeGuard(options.runtimeGuard, "share-url-wait");
+        if (!runtimeStatus?.ok) return { ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" };
+      }
+      let activeSurface = dialog;
+      if (typeof options.getDialogs === "function") {
+        const visibleFinalSurfaces = collapseNestedShareSurfaces(Array.from(options.getDialogs() || [])
+          .filter(surface => shareSurfaceVisibilityDetails(surface).visible)
+          .filter(surface => classifyShareSurface(surface) === "final")
+          .map(node => ({ node })))
+          .map(item => item.node);
+        if (visibleFinalSurfaces.length > 1) {
+          return { ok: false, stage: "share-dialog", reason: "multiple visible final share surfaces after Create link" };
+        }
+        if (visibleFinalSurfaces.length === 1) activeSurface = visibleFinalSurfaces[0];
+      }
+      const url = extractValidatedChatGptShareUrl(activeSurface);
+      if (url) return { ok: true, url, surface: activeSurface };
+      const copyControls = nodesIncludingRoot(activeSurface, "button, [role='button'], [role='menuitem']")
+        .filter(isCopyShareLinkControl);
+      if (copyControls.length > 0) {
+        return {
+          ok: false,
+          stage: "share-url",
+          reason: "the share URL is not exposed in the DOM and a Copy link control is available",
+          copyAvailable: true,
+          surface: activeSurface
+        };
+      }
+      if (nowFn() >= deadline) break;
+      await wait(pollMs);
+    }
+    return { ok: false, stage: "share-url", reason: "timed out waiting for a validated ChatGPT share URL" };
+  }
+
+  // Updating an existing whole-conversation link is a separate state
+  // transition from merely opening its share surface. Wait for a post-click
+  // final surface whose validated URL is available and whose visible control
+  // state changed. A URL that was already present before the Update click is
+  // not accepted while the Update control remains unchanged.
+  async function waitForUpdatedConversationShareUrl(dialog, previousUrl = "", options = {}) {
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, options.timeoutMs) : SHARE_URL_TIMEOUT_MS;
+    const pollMs = Number.isFinite(options.pollMs) ? Math.max(1, options.pollMs) : SHARE_POLL_MS;
+    const wait = options.sleep || (ms => sleep(ms));
+    const nowFn = options.now || (() => Date.now());
+    const deadline = nowFn() + timeoutMs;
+    const beforeSignature = options.beforeSignature || captureShareSurfaceSnapshot(dialog).signature;
+    while (nowFn() <= deadline) {
+      if (options.runtimeGuard?.isAborted?.()) {
+        return { ok: false, stage: "runtime", reason: options.runtimeGuard.getFailure?.()?.error || "runtime unavailable" };
+      }
+      if (options.runtimeGuard?.check) {
+        const runtimeStatus = await checkRuntimeGuard(options.runtimeGuard, "share-update-wait");
+        if (!runtimeStatus?.ok) return { ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" };
+      }
+      let activeSurface = dialog;
+      if (typeof options.getDialogs === "function") {
+        const visibleFinalSurfaces = collapseNestedShareSurfaces(Array.from(options.getDialogs() || [])
+          .filter(surface => shareSurfaceVisibilityDetails(surface).visible)
+          .filter(surface => classifyShareSurface(surface) === "final")
+          .map(node => ({ node })))
+          .map(item => item.node);
+        if (visibleFinalSurfaces.length > 1) {
+          return { ok: false, stage: "share-update", reason: "multiple visible final share surfaces after Update link" };
+        }
+        if (visibleFinalSurfaces.length === 1) activeSurface = visibleFinalSurfaces[0];
+      }
+      const url = validateStrictChatGptShareUrl(extractValidatedChatGptShareUrl(activeSurface));
+      const currentSignature = captureShareSurfaceSnapshot(activeSurface).signature;
+      const updateControls = nodesIncludingRoot(activeSurface, "button, [role='button'], [role='menuitem']")
+        .filter(isUpdateShareLinkControl);
+      if (url && (url !== previousUrl || currentSignature !== beforeSignature || updateControls.length === 0)) {
+        return { ok: true, url, surface: activeSurface };
+      }
+      if (nowFn() >= deadline) break;
+      await wait(pollMs);
+    }
+    return { ok: false, stage: "share-update", reason: "a refreshed conversation share URL was not confirmed after Update link" };
+  }
+
+  async function resolveShareUrlFromCopySurface(surface, options = {}) {
+    const copyButton = findCopyShareLinkButton(surface);
+    const waitForSuccess = options.waitForCopySuccess || waitForCopySuccess;
+    const readClipboardText = options.readClipboardText || (() => navigator.clipboard.readText());
+    const requestManualUrl = options.requestManualShareUrl || requestManualVisualizeShareUrl;
+    let clipboardText = "";
+    let manualText = "";
+    let activeSurface = surface;
+    let copyClicked = false;
+    let copySignalObserved = false;
+    const checkRuntime = async phase => {
+      if (options.runtimeGuard?.isAborted?.()) {
+        return { ok: false, stage: "runtime", reason: options.runtimeGuard.getFailure?.()?.error || "runtime unavailable" };
+      }
+      if (options.runtimeGuard?.check) {
+        const status = await checkRuntimeGuard(options.runtimeGuard, phase);
+        if (!status?.ok) return { ok: false, stage: "runtime", reason: status?.error || "runtime unavailable" };
+      }
+      return { ok: true };
+    };
+    try {
+      let runtimeStatus = await checkRuntime("share-copy-before-click");
+      if (!runtimeStatus.ok) return runtimeStatus;
+      if (copyButton) {
+        const beforeState = captureCopySuccessState(surface, copyButton, options);
+        try {
+          copyButton.click();
+          copyClicked = true;
+        } catch {
+          copyClicked = false;
+        }
+        if (copyClicked) {
+          let signalResult = null;
+          try {
+            signalResult = await waitForSuccess(surface, copyButton, {
+              ...options,
+              beforeState,
+              timeoutMs: Number.isFinite(options.copySuccessTimeoutMs)
+                ? options.copySuccessTimeoutMs
+                : options.timeoutMs
+            });
+          } catch {}
+          copySignalObserved = signalResult?.ok === true;
+          if (signalResult?.surface) activeSurface = signalResult.surface;
+          runtimeStatus = await checkRuntime("share-copy-after-signal");
+          if (!runtimeStatus.ok) return runtimeStatus;
+          if (copySignalObserved && options.clipboardPermissionGranted === true) {
+            runtimeStatus = await checkRuntime("share-clipboard-before-read");
+            if (!runtimeStatus.ok) return runtimeStatus;
+            try {
+              clipboardText = String(await readClipboardText() || "");
+            } catch {
+              clipboardText = "";
+            }
+            const validatedClipboardUrl = validateStrictChatGptShareUrl(clipboardText);
+            if (validatedClipboardUrl) {
+              return { ok: true, url: validatedClipboardUrl, copyClicked, copySignalObserved, source: "clipboard", surface: activeSurface };
+            }
+          }
+        }
+      }
+
+      runtimeStatus = await checkRuntime("share-manual-before-open");
+      if (!runtimeStatus.ok) return runtimeStatus;
+      try {
+        manualText = String(await requestManualUrl({
+          copyClicked,
+          copySignalObserved,
+          clipboardPermissionGranted: options.clipboardPermissionGranted === true
+        }) || "");
+      } catch {
+        manualText = "";
+      }
+      runtimeStatus = await checkRuntime("share-manual-after-close");
+      if (!runtimeStatus.ok) return runtimeStatus;
+      const validatedManualUrl = validateStrictChatGptShareUrl(manualText);
+      if (validatedManualUrl) {
+        return { ok: true, url: validatedManualUrl, copyClicked, copySignalObserved, source: "manual", surface: activeSurface };
+      }
+      return {
+        ok: false,
+        stage: "manual-share-url",
+        reason: "a valid ChatGPT share URL was not provided",
+        copyClicked,
+        copySignalObserved
+      };
+    } finally {
+      clipboardText = "";
+      manualText = "";
+    }
+  }
+
+  async function resolveShareUrlFromInstantCopy(signal, options = {}) {
+    const readClipboardText = options.readClipboardText || (() => navigator.clipboard.readText());
+    const requestManualUrl = options.requestManualShareUrl || requestManualVisualizeShareUrl;
+    let clipboardText = "";
+    let manualText = "";
+    const checkRuntime = async phase => {
+      if (options.runtimeGuard?.isAborted?.()) {
+        return { ok: false, stage: "runtime", reason: options.runtimeGuard.getFailure?.()?.error || "runtime unavailable" };
+      }
+      if (options.runtimeGuard?.check) {
+        const status = await checkRuntimeGuard(options.runtimeGuard, phase);
+        if (!status?.ok) return { ok: false, stage: "runtime", reason: status.error || "runtime unavailable" };
+      }
+      return { ok: true };
+    };
+    try {
+      const signalText = String(signal?.text || signal?.node?.innerText || signal?.node?.textContent || "");
+      if (!signal || !isWholeConversationShareCopySuccessText(signalText)) {
+        return {
+          ok: false,
+          stage: "share-dialog",
+          reason: "a fresh whole-conversation copy-success signal was not verified",
+          shareInteraction: "instant-copy",
+          conversationShareActionOccurred: true,
+          signal
+        };
+      }
+      let runtimeStatus = await checkRuntime("conversation-share-copy-after-signal");
+      if (!runtimeStatus.ok) return runtimeStatus;
+      if (options.clipboardPermissionGranted === true) {
+        runtimeStatus = await checkRuntime("conversation-share-clipboard-before-read");
+        if (!runtimeStatus.ok) return runtimeStatus;
+        try {
+          clipboardText = String(await readClipboardText() || "");
+        } catch {
+          clipboardText = "";
+        }
+        const validatedClipboardUrl = validateStrictChatGptShareUrl(clipboardText);
+        if (validatedClipboardUrl) {
+          return {
+            ok: true,
+            url: validatedClipboardUrl,
+            source: "clipboard",
+            shareInteraction: "instant-copy",
+            conversationShareActionOccurred: true,
+            signal
+          };
+        }
+      }
+
+      runtimeStatus = await checkRuntime("conversation-share-manual-before-open");
+      if (!runtimeStatus.ok) return runtimeStatus;
+      try {
+        manualText = String(await requestManualUrl({
+          copyClicked: true,
+          copySignalObserved: true,
+          clipboardPermissionGranted: options.clipboardPermissionGranted === true,
+          shareKind: "conversation",
+          signal
+        }) || "");
+      } catch {
+        manualText = "";
+      }
+      runtimeStatus = await checkRuntime("conversation-share-manual-after-close");
+      if (!runtimeStatus.ok) return runtimeStatus;
+      const validatedManualUrl = validateStrictChatGptShareUrl(manualText);
+      if (validatedManualUrl) {
+        return {
+          ok: true,
+          url: validatedManualUrl,
+          source: "manual",
+          shareInteraction: "instant-copy",
+          conversationShareActionOccurred: true,
+          signal
+        };
+      }
+      return {
+        ok: false,
+        stage: "manual-share-url",
+        reason: "a valid ChatGPT share URL was not provided",
+        shareInteraction: "instant-copy",
+        conversationShareActionOccurred: true,
+        signal
+      };
+    } finally {
+      clipboardText = "";
+      manualText = "";
+    }
+  }
+
+  async function createOrReuseVisualizeShareLink(currentAssistantNode, options = {}) {
+    const root = options.root || document;
+    const shareKind = options.shareKind === "conversation" ? "conversation" : "response";
+    const getDialogs = options.getDialogs || (() => getShareSurfaceCandidates(root));
+    const waitForDialog = options.waitForRelevantShareDialog || waitForRelevantShareDialog;
+    const waitForUrl = options.waitForValidatedShareUrl || waitForValidatedShareUrl;
+    const waitForUpdatedUrl = options.waitForUpdatedShareUrl || waitForUpdatedConversationShareUrl;
+    const requestUpdateConsent = options.requestConversationShareUpdateConsent || requestConversationShareUpdateConsent;
+    const runtimeGuard = options.runtimeGuard || null;
+    let shareSource = "";
+    let shareCreatedThisAttempt = false;
+    let shareUpdatedThisAttempt = false;
+    let validatedShareUrl = "";
+    let shareInteraction = "";
+    let conversationShareActionOccurred = false;
+    const fail = (stage, reason, details = {}) => ({
+      ok: false,
+      ...details,
+      stage,
+      reason,
+      shareKind,
+      shareSource,
+      shareCreatedThisAttempt,
+      shareUpdatedThisAttempt,
+      validatedShareUrl,
+      shareInteraction,
+      conversationShareActionOccurred
+    });
+    const runtimeStatus = runtimeGuard?.check
+      ? await checkRuntimeGuard(runtimeGuard, "share-button")
+      : { ok: true };
+    if (!runtimeStatus?.ok) return fail("runtime", runtimeStatus.error || "runtime unavailable");
+
+    const shareRoot = options.shareRoot || (shareKind === "conversation" ? root : currentAssistantNode);
+    let triggerResolution = null;
+    let shareButton = null;
+    if (typeof options.findShareButton === "function") {
+      try { shareButton = options.findShareButton(shareRoot); } catch {}
+    } else if (shareKind === "conversation") {
+      triggerResolution = resolveConversationShareTrigger(root);
+      if (triggerResolution.status !== "found") {
+        artifactDebugLog("selected-share-trigger", { selected: false, kind: shareKind, reason: triggerResolution.reason });
+        return fail("share-button", triggerResolution.reason || "conversation share button was not found or was ambiguous");
+      }
+      shareButton = triggerResolution.control;
+    } else {
+      triggerResolution = resolveResponseShareTrigger(shareRoot);
+      if (triggerResolution.status !== "found") {
+        artifactDebugLog("selected-share-trigger", { selected: false, kind: shareKind, reason: triggerResolution.reason });
+        return fail("share-button", triggerResolution.reason || "current assistant share button was not found or was ambiguous");
+      }
+      shareButton = triggerResolution.control;
+    }
+    if (!shareButton) {
+      artifactDebugLog("selected-share-trigger", { selected: false, kind: shareKind, reason: "missing-or-ambiguous" });
+      return fail("share-button", "share button was not found or was ambiguous");
+    }
+    if (options.shareTrigger && options.shareTrigger !== shareButton) {
+      return fail("share-button", "the selected share trigger changed before click");
+    }
+
+    // Re-resolve the trigger immediately before the side-effecting click. A
+    // React re-render may have replaced the preflight node or changed its
+    // visibility while the user was deciding about the share.
+    if (typeof options.findShareButton !== "function") {
+      const liveResolution = shareKind === "conversation"
+        ? resolveConversationShareTrigger(root)
+        : resolveResponseShareTrigger(shareRoot);
+      if (liveResolution.status !== "found") {
+        return fail("share-button", liveResolution.reason || "share trigger was not found immediately before click");
+      }
+      if (liveResolution.control !== shareButton) {
+        return fail("share-button", "the selected share trigger changed before click");
+      }
+      triggerResolution = liveResolution;
+    }
+    artifactDebugLog("selected-share-trigger", { selected: true, kind: shareKind, trigger: shareElementDiagnostic(shareButton, currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode) });
+    const beforeDialogs = captureShareSurfaceSnapshots(getDialogs() || []);
+    const beforeCopySignals = shareKind === "conversation"
+      ? captureConversationShareCopySignals(root)
+      : [];
+    artifactDebugLog("visible-top-layer-before", {
+      count: beforeDialogs.filter(item => item.visible).length,
+      surfaces: beforeDialogs.filter(item => item.visible).slice(0, 6).map(item => shareSurfaceDiagnostic(item.node))
+    });
+    if (!isVisibleEnabledControl(shareButton)) return fail("share-button", "share button is not visible or enabled");
+    const triggerBeforeClick = shareElementDiagnostic(shareButton, currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode);
+    try {
+      shareButton.click();
+      if (shareKind === "conversation") conversationShareActionOccurred = true;
+    } catch (error) {
+      return fail("share-button", error?.message || String(error));
+    }
+    artifactDebugLog("trigger-click-dispatched", {
+      before: triggerBeforeClick,
+      after: shareElementDiagnostic(shareButton, currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode)
+    });
+
+    let dialogResult;
+    if (shareKind === "conversation") {
+      let waitForConversationOutcome = options.waitForConversationShareOutcome || waitForConversationShareOutcome;
+      // Preserve the legacy test/integration seam when a caller explicitly
+      // injects the old dialog waiter. Production uses the new outcome
+      // resolver; an injected legacy waiter is adapted to its surface result.
+      if (!options.waitForConversationShareOutcome && typeof options.waitForRelevantShareDialog === "function") {
+        waitForConversationOutcome = async ({ beforeSurfaces, ...outcomeOptions } = {}) => {
+          const legacy = await options.waitForRelevantShareDialog(beforeSurfaces || [], outcomeOptions);
+          if (!legacy?.ok) return legacy;
+          return {
+            ...legacy,
+            kind: legacy.kind || "final",
+            surface: legacy.surface || legacy.dialog,
+            dialog: legacy.dialog || legacy.surface,
+            surfaceKind: legacy.surfaceKind || legacy.kind || "final"
+          };
+        };
+      }
+      dialogResult = await waitForConversationOutcome({
+        ...options,
+        root,
+        runtimeGuard,
+        getDialogs,
+        beforeSurfaces: beforeDialogs,
+        beforeCopySignals
+      });
+    } else {
+      dialogResult = await waitForDialog(beforeDialogs, {
+        ...options,
+        root,
+        runtimeGuard,
+        getDialogs
+      });
+    }
+    if (!dialogResult?.ok) {
+      return fail(dialogResult?.stage || "share-dialog", dialogResult?.reason || "share dialog was not found", dialogResult || {});
+    }
+    let shareUrl = "";
+    if (shareKind === "conversation" && dialogResult.kind === "instant-copy") {
+      shareInteraction = "instant-copy";
+      const copyResult = await resolveShareUrlFromInstantCopy(dialogResult.signal, {
+        ...options,
+        runtimeGuard,
+        clipboardPermissionGranted: options.clipboardPermissionGranted === true,
+        requestManualShareUrl: options.requestManualShareUrl || requestManualVisualizeShareUrl
+      });
+      conversationShareActionOccurred = true;
+      if (!copyResult?.ok) {
+        return fail(copyResult?.stage || "manual-share-url", copyResult?.reason || "a valid ChatGPT share URL was not provided", {
+          ...copyResult,
+          shareInteraction,
+          conversationShareActionOccurred
+        });
+      }
+      shareSource = "existing";
+      shareUrl = copyResult.url;
+    }
+    let dialog = dialogResult.dialog;
+    const intermediateShareSurface = dialogResult.kind === "intermediate" ||
+      (dialogResult.kind === "surface" && dialogResult.surfaceKind === "intermediate");
+    if (intermediateShareSurface) {
+      artifactDebugLog("intermediate-share-menu", shareSurfaceDiagnostic(dialog));
+      const intermediate = findIntermediateShareAction(dialog);
+      if (intermediate.ambiguous || !intermediate.control) {
+        return fail("share-menu", intermediate.ambiguous ? "multiple intermediate share actions were equally eligible" : "an intermediate share action was not found");
+      }
+      const beforeFinalSurfaces = captureShareSurfaceSnapshots(getDialogs() || []);
+      if (runtimeGuard?.check) {
+        const menuRuntimeStatus = await checkRuntimeGuard(runtimeGuard, "intermediate-share-menu");
+        if (!menuRuntimeStatus?.ok) return fail("runtime", menuRuntimeStatus.error || "runtime unavailable");
+      }
+      try {
+        intermediate.control.click();
+      } catch (error) {
+        return fail("share-menu", error?.message || String(error));
+      }
+      const finalResult = await waitForDialog(beforeFinalSurfaces, {
+        ...options,
+        root,
+        runtimeGuard,
+        getDialogs
+      });
+      if (!finalResult?.ok) {
+        return fail(finalResult?.stage || "share-dialog", finalResult?.reason || "final share surface was not found", finalResult || {});
+      }
+      if (finalResult.kind && finalResult.kind !== "final") return fail("share-dialog", "a final share surface did not open after the intermediate action");
+      dialog = finalResult.dialog;
+    }
+    artifactDebugLog("final-share-surface", shareSurfaceDiagnostic(dialog));
+    if (!shareUrl) shareUrl = extractValidatedChatGptShareUrl(dialog);
+    if (shareUrl) shareSource = "existing";
+    artifactDebugLog("existing-share-url-detected", { detected: !!shareUrl, kind: shareKind });
+
+    const finalControls = nodesIncludingRoot(dialog, "button, [role='button'], [role='menuitem']");
+    const copyControlCount = finalControls.filter(isCopyShareLinkControl).length;
+    const updateControls = finalControls.filter(isUpdateShareLinkControl);
+    if (shareKind === "conversation" && updateControls.length > 0) {
+      if (updateControls.length !== 1) {
+        return fail("share-update", "multiple conversation Update link controls were found", { updateControlCount: updateControls.length });
+      }
+      const updateControl = updateControls[0];
+      let updateConsentResult;
+      try {
+        updateConsentResult = await requestUpdateConsent({ dialog, currentAssistantNode, control: updateControl, existingShareUrl: shareUrl });
+      } catch (error) {
+        return fail("share-update", error?.message || "conversation share update consent failed");
+      }
+      const updateApproved = updateConsentResult === true || updateConsentResult?.approved === true;
+      if (!updateApproved) return fail("share-update", "user declined updating the existing conversation share link");
+      if (!isVisibleEnabledShareAction(updateControl)) return fail("share-update", "conversation Update link is not visible or enabled");
+      if (runtimeGuard?.check) {
+        const updateRuntimeStatus = await checkRuntimeGuard(runtimeGuard, "share-update");
+        if (!updateRuntimeStatus?.ok) return fail("runtime", updateRuntimeStatus.error || "runtime unavailable");
+      }
+      const previousUrl = validateStrictChatGptShareUrl(shareUrl);
+      const beforeUpdateSignature = captureShareSurfaceSnapshot(dialog).signature;
+      try {
+        updateControl.click();
+        shareUpdatedThisAttempt = true;
+      } catch (error) {
+        return fail("share-update", error?.message || String(error));
+      }
+      let updatedResult;
+      try {
+        updatedResult = await waitForUpdatedUrl(dialog, previousUrl, {
+          ...options,
+          root,
+          runtimeGuard,
+          getDialogs,
+          beforeSignature: beforeUpdateSignature
+        });
+      } catch (error) {
+        return fail("share-update", error?.message || "updated conversation share URL could not be confirmed");
+      }
+      if (!updatedResult?.ok) {
+        return fail(updatedResult?.stage || "share-update", updatedResult?.reason || "updated conversation share URL could not be confirmed", updatedResult || {});
+      }
+      if (updatedResult.surface) dialog = updatedResult.surface;
+      shareUrl = updatedResult.url || extractValidatedChatGptShareUrl(dialog);
+      shareSource = "existing";
+    }
+
+    if (!shareUrl) {
+      if (hasExistingShareSurfaceStructure(dialog) || copyControlCount > 0 || updateControls.length > 0) {
+        shareSource = "existing";
+        const copyResult = await resolveShareUrlFromCopySurface(dialog, options);
+        if (!copyResult?.ok) {
+          return fail(copyResult?.stage || "manual-share-url", copyResult?.reason || "a valid ChatGPT share URL was not provided", copyResult || {});
+        }
+        if (copyResult.surface) dialog = copyResult.surface;
+        shareUrl = copyResult.url;
+      } else {
+        const createButton = findCreateShareLinkButton(dialog);
+        if (!createButton) return fail("create-link", "create-link button was not found or was ambiguous");
+        if (runtimeGuard?.check) {
+          const createRuntimeStatus = await checkRuntimeGuard(runtimeGuard, "create-link");
+          if (!createRuntimeStatus?.ok) return fail("runtime", createRuntimeStatus.error || "runtime unavailable");
+        }
+        try {
+          createButton.click();
+        } catch (error) {
+          return fail("create-link", error?.message || String(error));
+        }
+        artifactDebugLog("create-link-clicked", { control: shareElementDiagnostic(createButton), clickCount: 1 });
+        shareSource = "created";
+        shareCreatedThisAttempt = true;
+        const urlResult = await waitForUrl(dialog, { ...options, runtimeGuard, getDialogs });
+        if (urlResult?.surface) dialog = urlResult.surface;
+        if (urlResult?.ok) {
+          shareUrl = urlResult.url;
+        } else {
+          if (urlResult?.stage === "runtime" || urlResult?.stage === "share-dialog") {
+            return fail(urlResult.stage, urlResult.reason || "share flow was aborted", urlResult);
+          }
+          const copyResult = await resolveShareUrlFromCopySurface(dialog, options);
+          if (!copyResult?.ok) {
+            return fail(copyResult?.stage || urlResult?.stage || "share-url", copyResult?.reason || urlResult?.reason || "validated share URL was not found", copyResult || urlResult || {});
+          }
+          if (copyResult.surface) dialog = copyResult.surface;
+          shareUrl = copyResult.url;
+        }
+      }
+    }
+    validatedShareUrl = validateStrictChatGptShareUrl(normalizeChatGptShareUrl(shareUrl));
+    if (!validatedShareUrl) return fail("share-url", "share flow returned an invalid ChatGPT share URL");
+    artifactDebugLog("validated-share-url", { validated: true, source: shareSource, kind: shareKind, updated: shareUpdatedThisAttempt });
+
+    let dialogClosed = false;
+    const closeButton = findCloseShareDialogButton(dialog);
+    if (closeButton) {
+      if (runtimeGuard?.check) {
+        const closeRuntimeStatus = await checkRuntimeGuard(runtimeGuard, "share-dialog-close");
+        if (!closeRuntimeStatus?.ok) return fail("runtime", closeRuntimeStatus.error || "runtime unavailable");
+      }
+      try {
+        closeButton.click();
+        dialogClosed = true;
+      } catch {}
+    }
+    return {
+      ok: true,
+      url: validatedShareUrl,
+      source: shareSource,
+      shareKind,
+      shareSource,
+      shareCreatedThisAttempt,
+      shareUpdatedThisAttempt,
+      validatedShareUrl,
+      shareInteraction,
+      conversationShareActionOccurred,
+      dialogClosed
+    };
   }
 
   function filenameFromArtifactText(text, extensions = ["html", "htm"]) {
@@ -967,6 +3485,279 @@
 
   function filenamesFromText(text) {
     return filenamesFromArtifactText(text, ["html", "htm"]);
+  }
+
+  function artifactNameKey(value) {
+    const text = String(value || "");
+    try {
+      return text.normalize("NFC").toLowerCase();
+    } catch {
+      return text.toLowerCase();
+    }
+  }
+
+  function isUsableFileLinkHref(value) {
+    const href = String(value || "").trim();
+    return !!href && href !== "#" && !/^javascript:/i.test(href);
+  }
+
+  function filenamesFromFileLinkText(text, extensions = FILE_DELIVERABLE_EXTENSIONS) {
+    const decoded = decodePercentEncodedRuns(text);
+    const extensionPattern = extensions.map(escapeRegExp).join("|");
+    const tokens = Array.from(decoded.matchAll(new RegExp(`([^\\s'\"<>/\\\\]+\\.(?:${extensionPattern}))(?=$|[\\s?#'\"<>])`, "gi")))
+      .map(match => safeArtifactName(match[1], extensions));
+    return tokens.length ? Array.from(new Set(tokens)) : filenamesFromArtifactText(decoded, extensions);
+  }
+
+  function collectFileLikeLinks(container, extensions = FILE_DELIVERABLE_EXTENSIONS) {
+    if (!container?.querySelectorAll) return [];
+    const links = Array.from(container.querySelectorAll("a, [role='link']"));
+    const entries = [];
+    const seen = new Set();
+
+    for (const node of links) {
+      if (isInsideUnsupportedRichAppBlock(node)) continue;
+      const values = artifactNodeTextValues(node);
+      const names = new Set();
+      values.forEach(value => {
+        filenamesFromFileLinkText(value, extensions).forEach(name => names.add(name));
+      });
+      const rawHref = String(node.getAttribute?.("href") || "").trim();
+      const explicitFileMarker = !!(
+        node.getAttribute?.("data-file-name") ||
+        node.getAttribute?.("data-filename") ||
+        /(?:download|artifact|attachment|file-card)/i.test(String(node.getAttribute?.("data-testid") || ""))
+      );
+      const expectedDeliverable = !isUsableFileLinkHref(rawHref) ||
+        hasDownloadAttribute(node) ||
+        /^(?:blob:|data:|sandbox:)/i.test(rawHref) ||
+        isKnownChatGptFileHref(rawHref) ||
+        explicitFileMarker;
+      if (!expectedDeliverable) continue;
+      for (const name of names) {
+        const safeName = safeArtifactName(name, extensions);
+        const key = `${artifactNameKey(safeName)}::${rawHref}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push({
+          name: safeName,
+          href: rawHref,
+          unresolved: !isUsableFileLinkHref(rawHref),
+          node
+        });
+      }
+    }
+    return entries;
+  }
+
+  function capturedFileNameSet(attachments = [], downloadedAttachments = [], generatedMarkdown = {}) {
+    const names = new Set();
+    [...attachments, ...downloadedAttachments].forEach(file => {
+      if (file?.name) names.add(artifactNameKey(safeArtifactName(file.name, FILE_DELIVERABLE_EXTENSIONS)));
+    });
+    if (generatedMarkdown?.markdown && generatedMarkdown?.name) {
+      names.add(artifactNameKey(safeArtifactName(generatedMarkdown.name, FILE_DELIVERABLE_EXTENSIONS)));
+    }
+    const downloadedMarkdown = generatedMarkdown?.downloadedMarkdown;
+    if (downloadedMarkdown?.name) {
+      names.add(artifactNameKey(safeArtifactName(downloadedMarkdown.name, FILE_DELIVERABLE_EXTENSIONS)));
+    }
+    return names;
+  }
+
+  function collectRichAppBlockCandidates(root, options = {}) {
+    const idPrefix = String(options.idPrefix || "rich-app");
+    return nodesIncludingRoot(root, '[data-app-block-preview="true"]').map((node, index) => ({
+      id: `${idPrefix}-${index}`,
+      kind: "app-block",
+      source: "data-app-block-preview",
+      node
+    }));
+  }
+
+  function collectRichArtifactCandidatesForStoredNote(currentAssistantNode, { previousQa = null, usePreviousQaForHtml = false } = {}) {
+    if (usePreviousQaForHtml && previousQa?.answerNode) {
+      return collectRichAppBlockCandidates(previousQa.answerNode, { idPrefix: "stored-a1-rich" });
+    }
+    return collectRichAppBlockCandidates(currentAssistantNode, { idPrefix: "stored-current-rich" });
+  }
+
+  function assessRichArtifactIntegrity({ expected = [], captures = [] } = {}) {
+    const completeRepresentations = new Set(["interactive-export", "static-markdown-complete"]);
+    const captureByExpectedId = new Map();
+    (captures || []).forEach(capture => {
+      const expectedId = String(capture?.expectedId || capture?.richArtifactId || capture?.id || "");
+      if (!expectedId || !completeRepresentations.has(capture?.representation)) return;
+      captureByExpectedId.set(expectedId, capture);
+    });
+    const items = (expected || []).map((candidate, index) => {
+      const id = String(candidate?.id || `rich-app-${index}`);
+      const capture = captureByExpectedId.get(id) || null;
+      return {
+        id,
+        kind: candidate?.kind || "app-block",
+        source: candidate?.source || "unknown",
+        representation: capture?.representation || "none",
+        complete: !!capture
+      };
+    });
+    const missingItems = items.filter(item => !item.complete);
+    return {
+      complete: missingItems.length === 0,
+      expectedCount: items.length,
+      completeCount: items.length - missingItems.length,
+      missingCount: missingItems.length,
+      items,
+      missingItems
+    };
+  }
+
+  function combineCaptureIntegrity(fileIntegrity, richIntegrity) {
+    const files = fileIntegrity || assessArtifactIntegrity();
+    const richArtifacts = richIntegrity || assessRichArtifactIntegrity();
+    return {
+      complete: !!files.complete && !!richArtifacts.complete,
+      files,
+      richArtifacts
+    };
+  }
+
+  function assessArtifactIntegrity({
+    fileLinks = [],
+    artifactRows = [],
+    attachments = [],
+    downloadedAttachments = [],
+    generatedMarkdown = {},
+    failures = []
+  } = {}) {
+    const capturedNames = capturedFileNameSet(attachments, downloadedAttachments, generatedMarkdown);
+    const capturedHtmlNames = Array.from(new Set(
+      [...attachments, ...downloadedAttachments]
+        .map(file => file?.name || "")
+        .filter(name => /\.html?$/i.test(name))
+        .map(name => safeArtifactName(name, ["html", "htm"]))
+    ));
+    const expectedHtmlNames = Array.from(new Set([
+      ...fileLinks.map(item => item?.name || ""),
+      ...artifactRows.map(item => item?.name || ""),
+      ...capturedHtmlNames
+    ].filter(name => /\.html?$/i.test(name)).map(name => safeArtifactName(name, ["html", "htm"]))));
+    const expectedDeliverableNames = Array.from(new Set([
+      ...fileLinks.map(item => item?.name || ""),
+      ...artifactRows.map(item => item?.name || "")
+    ].filter(Boolean).map(name => safeArtifactName(name, FILE_DELIVERABLE_EXTENSIONS))));
+    const missingNames = expectedDeliverableNames.filter(name => !capturedNames.has(artifactNameKey(name)));
+    const missingKeys = new Set(missingNames.map(artifactNameKey));
+    const unresolvedNames = Array.from(new Set(fileLinks
+      .filter(item => item?.unresolved && missingKeys.has(artifactNameKey(item.name)))
+      .map(item => item.name)));
+    const failureDetails = Array.from(new Set((failures || [])
+      .filter(item => !item?.name || missingKeys.has(artifactNameKey(item.name)))
+      .map(item => `${item?.name || "unknown file"}: ${item?.reason || "capture failed"}`)));
+
+    return {
+      complete: missingNames.length === 0,
+      expectedHtmlNames,
+      capturedHtmlNames,
+      expectedDeliverableNames,
+      missingNames,
+      unresolvedNames,
+      failureDetails
+    };
+  }
+
+  function formatI18nTemplate(value, fields) {
+    return String(value || "").replace(/\{([A-Za-z0-9_]+)\}/g, (_match, key) => String(fields[key] ?? ""));
+  }
+
+  function confirmPartialArtifactSave(report, confirmFn = globalThis.confirm) {
+    if (report?.complete) return true;
+    const missingNames = report?.missingNames || [];
+    const visibleNames = missingNames.slice(0, 12).join(", ") + (missingNames.length > 12 ? ` … (+${missingNames.length - 12})` : "");
+    const message = formatI18nTemplate(t("partialArtifactSaveConfirm"), {
+      missingCount: missingNames.length,
+      expectedHtmlCount: report?.expectedHtmlNames?.length || 0,
+      capturedHtmlCount: report?.capturedHtmlNames?.length || 0,
+      missingNames: visibleNames || "-"
+    });
+    return typeof confirmFn === "function" ? confirmFn(message) === true : false;
+  }
+
+  function confirmIncompleteCaptureSave(overallIntegrity, confirmFn = globalThis.confirm) {
+    if (overallIntegrity?.complete) return true;
+    const rich = overallIntegrity?.richArtifacts || assessRichArtifactIntegrity();
+    const files = overallIntegrity?.files || assessArtifactIntegrity();
+    if (rich.complete) return confirmPartialArtifactSave(files, confirmFn);
+    const missingFileNames = (files.missingNames || []).slice(0, 12);
+    const extraFileCount = Math.max(0, (files.missingNames || []).length - missingFileNames.length);
+    const visibleFileNames = missingFileNames.join(", ") + (extraFileCount ? ` … (+${extraFileCount})` : "");
+    const message = formatI18nTemplate(t("partialRichArtifactSaveConfirm"), {
+      expectedRichCount: rich.expectedCount || 0,
+      completeRichCount: rich.completeCount || 0,
+      missingRichCount: rich.missingCount || 0,
+      missingFileNames: visibleFileNames || "-"
+    });
+    return typeof confirmFn === "function" ? confirmFn(message) === true : false;
+  }
+
+  function buildMissingRichArtifactWarning(richIntegrity) {
+    if (!richIntegrity || richIntegrity.complete) return "";
+    const body = formatI18nTemplate(t("missingRichArtifactWarningBody"), {
+      expectedRichCount: richIntegrity.expectedCount || 0
+    });
+    return `> [!warning] ${t("missingRichArtifactWarningTitle")}\n> ${body}`;
+  }
+
+  function removeEmptyMarkdownLinkTargets(text) {
+    const replacePlainSegment = value => String(value || "").replace(/\[([^\]\n]+)\]\(\s*\)/g, "$1");
+    const replaceOutsideInlineCode = line => {
+      let result = "";
+      let cursor = 0;
+      let codeDelimiter = "";
+      while (cursor < line.length) {
+        if (!codeDelimiter) {
+          const nextTick = line.indexOf("`", cursor);
+          if (nextTick < 0) {
+            result += replacePlainSegment(line.slice(cursor));
+            break;
+          }
+          result += replacePlainSegment(line.slice(cursor, nextTick));
+          let end = nextTick + 1;
+          while (line[end] === "`") end++;
+          codeDelimiter = line.slice(nextTick, end);
+          result += codeDelimiter;
+          cursor = end;
+          continue;
+        }
+        const closing = line.indexOf(codeDelimiter, cursor);
+        if (closing < 0) {
+          result += line.slice(cursor);
+          break;
+        }
+        result += line.slice(cursor, closing + codeDelimiter.length);
+        cursor = closing + codeDelimiter.length;
+        codeDelimiter = "";
+      }
+      return result;
+    };
+
+    let activeFence = null;
+    return String(text || "").split(/(\r?\n)/).map(part => {
+      if (/^\r?\n$/.test(part)) return part;
+      const fence = part.match(/^\s*(`{3,}|~{3,})/);
+      if (activeFence) {
+        const closingFence = part.match(/^\s*(`{3,}|~{3,})[\t ]*$/);
+        if (closingFence && closingFence[1][0] === activeFence.marker && closingFence[1].length >= activeFence.length) {
+          activeFence = null;
+        }
+        return part;
+      }
+      if (fence) {
+        activeFence = { marker: fence[1][0], length: fence[1].length };
+        return part;
+      }
+      return replaceOutsideInlineCode(part);
+    }).join("");
   }
 
   function filenameFromUrl(href) {
@@ -1225,6 +4016,282 @@
     };
   }
 
+  function isVisibleEnabledControl(node) {
+    if (!node) return false;
+    const tagName = String(node.tagName || "").toLowerCase();
+    const role = String(node.getAttribute?.("role") || "").toLowerCase();
+    if (tagName !== "button" && role !== "button") return false;
+    if (node.disabled === true || node.hidden === true) return false;
+    if (/^true$/i.test(String(node.getAttribute?.("aria-hidden") || ""))) return false;
+    if (/^(?:true|disabled)$/i.test(String(node.getAttribute?.("aria-disabled") || ""))) return false;
+    if (/^(?:true|disabled)$/i.test(String(node.getAttribute?.("data-disabled") || ""))) return false;
+    return elementVisibilityDetails(node).visible;
+  }
+
+  function isVisibleEnabledShareAction(node) {
+    if (!node) return false;
+    const tagName = String(node.tagName || "").toLowerCase();
+    const role = String(node.getAttribute?.("role") || "").toLowerCase();
+    if (tagName !== "button" && role !== "button" && role !== "menuitem") return false;
+    if (node.disabled === true || node.hidden === true) return false;
+    if (/^true$/i.test(String(node.getAttribute?.("aria-hidden") || ""))) return false;
+    if (/^(?:true|disabled)$/i.test(String(node.getAttribute?.("aria-disabled") || ""))) return false;
+    if (/^(?:true|disabled)$/i.test(String(node.getAttribute?.("data-disabled") || ""))) return false;
+    return elementVisibilityDetails(node).visible;
+  }
+
+  function shareElementDiagnostic(node, turnRoot = null) {
+    if (!node) return null;
+    let rect = null;
+    try {
+      const value = node.getBoundingClientRect?.();
+      if (value) {
+        rect = {
+          x: Math.round(Number(value.x) || 0),
+          y: Math.round(Number(value.y) || 0),
+          width: Math.round(Number(value.width) || 0),
+          height: Math.round(Number(value.height) || 0)
+        };
+      }
+    } catch {}
+    const turn = node.closest?.("[data-testid^='conversation-turn-']") || null;
+    const parent = node.parentElement || null;
+    return {
+      tag: String(node.tagName || "").toUpperCase(),
+      role: String(node.getAttribute?.("role") || ""),
+      ariaLabel: String(node.getAttribute?.("aria-label") || "").slice(0, 120),
+      title: String(node.getAttribute?.("title") || "").slice(0, 120),
+      testId: String(node.getAttribute?.("data-testid") || "").slice(0, 120),
+      dataState: String(node.getAttribute?.("data-state") || ""),
+      ariaExpanded: String(node.getAttribute?.("aria-expanded") || ""),
+      disabled: node.disabled === true || /^(?:true|disabled)$/i.test(String(node.getAttribute?.("aria-disabled") || "")),
+      connected: node.isConnected !== false,
+      visible: elementVisibilityDetails(node).visible,
+      rect,
+      turnTestId: String(turn?.getAttribute?.("data-testid") || "").slice(0, 120),
+      insideRequestedTurn: !!turnRoot && (turn === turnRoot || turnRoot.contains?.(node)),
+      parentRole: String(parent?.getAttribute?.("role") || ""),
+      parentAriaLabel: String(parent?.getAttribute?.("aria-label") || "").slice(0, 120)
+    };
+  }
+
+  function shareSurfaceDiagnostic(surface) {
+    if (!surface) return null;
+    const controls = nodesIncludingRoot(surface, "button, [role='button']");
+    let bodyDepth = -1;
+    try {
+      let current = surface;
+      let depth = 0;
+      while (current && current !== document.body) {
+        depth += 1;
+        current = current.parentElement;
+      }
+      if (current === document.body) bodyDepth = depth;
+    } catch {}
+    return {
+      ...shareElementDiagnostic(surface),
+      bodyDepth,
+      controlCount: controls.length,
+      inputCount: nodesIncludingRoot(surface, "input, textarea").length,
+      linkCount: nodesIncludingRoot(surface, "a[href]").length,
+      copyLinkControlCount: controls.filter(isCopyShareLinkControl).length,
+      updateLinkControlCount: controls.filter(isUpdateShareLinkControl).length,
+      createLinkControlCount: controls.filter(node => shareDialogControlScore(node, "create") >= 0).length,
+      hasValidatedShareUrl: !!extractValidatedChatGptShareUrl(surface)
+    };
+  }
+
+  function responseShareControlScore(node) {
+    if (!isVisibleEnabledControl(node) || node.classList?.contains("gpt2obs-btn")) return -1;
+    const labels = [
+      node.getAttribute?.("data-testid") || "",
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("title") || "",
+      controlLabel(node)
+    ].map(value => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    const marker = labels.join(" ");
+    if (!/(?:\bshare\b|공유)/i.test(marker)) return -1;
+
+    let score = 20;
+    const testId = String(node.getAttribute?.("data-testid") || "");
+    const aria = String(node.getAttribute?.("aria-label") || "");
+    const title = String(node.getAttribute?.("title") || "");
+    if (/share/i.test(testId)) score += 100;
+    if (/^(?:share|공유)$/i.test(aria.trim()) || /^(?:share|공유)$/i.test(title.trim())) score += 70;
+    if (/^(?:share|공유)$/i.test(controlLabel(node))) score += 35;
+
+    let ancestor = node.parentElement;
+    for (let depth = 0; depth < 5 && ancestor; depth++, ancestor = ancestor.parentElement) {
+      const regionMarker = [
+        ancestor.getAttribute?.("role") || "",
+        ancestor.getAttribute?.("data-testid") || "",
+        ancestor.getAttribute?.("aria-label") || "",
+        ancestor.getAttribute?.("class") || ancestor.className || ""
+      ].join(" ");
+      if (/(?:toolbar|footer|action)/i.test(regionMarker)) {
+        score += 30;
+        break;
+      }
+    }
+    return score;
+  }
+
+  function isResponseActionToolbarControl(node, turnRoot) {
+    let ancestor = node?.parentElement || null;
+    for (let depth = 0; depth < 7 && ancestor; depth++, ancestor = ancestor.parentElement) {
+      if (ancestor === turnRoot?.parentElement) break;
+      const role = String(ancestor.getAttribute?.("role") || "").toLowerCase();
+      const marker = [
+        ancestor.getAttribute?.("data-testid") || "",
+        ancestor.getAttribute?.("aria-label") || "",
+        ancestor.getAttribute?.("class") || ancestor.className || ""
+      ].join(" ").replace(/\s+/g, " ").trim();
+      if (role === "group" && /(?:response\s*actions?|응답\s*작업|assistant\s*actions?)/i.test(marker)) return true;
+      if (role === "toolbar" && /(?:response|assistant|응답).*(?:toolbar|actions?|작업)|(?:toolbar|actions?|작업).*(?:response|assistant|응답)/i.test(marker)) return true;
+      if (/(?:response|assistant|응답).*(?:toolbar|actions?|작업)|(?:toolbar|actions?|작업).*(?:response|assistant|응답)/i.test(marker)) return true;
+      if (ancestor === turnRoot) break;
+    }
+    return false;
+  }
+
+  function resolveResponseShareTrigger(currentAssistantNode) {
+    const root = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode;
+    if (!root?.querySelectorAll) {
+      return {
+        status: "missing",
+        control: null,
+        candidateCount: 0,
+        reason: "current assistant response action toolbar was not found"
+      };
+    }
+    const controls = nodesIncludingRoot(root, "button, [role='button']")
+      .filter(node => !node.classList?.contains("gpt2obs-btn"))
+      .filter(node => isResponseActionToolbarControl(node, root));
+    const scored = controls
+      .map((node, index) => ({ node, index, score: responseShareControlScore(node) }))
+      .filter(item => item.score >= 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+    artifactDebugLog("share-trigger-candidates", {
+      count: scored.length,
+      candidates: scored.slice(0, 8).map(item => ({ score: item.score, ...shareElementDiagnostic(item.node, root) }))
+    });
+    if (!scored.length) {
+      return {
+        status: "missing",
+        control: null,
+        candidateCount: 0,
+        reason: "current assistant response share button was not found"
+      };
+    }
+    if (scored.length > 1 && scored[0].score === scored[1].score) {
+      return {
+        status: "ambiguous",
+        control: null,
+        candidateCount: scored.length,
+        reason: "multiple current assistant response share buttons were equally eligible",
+        candidates: scored.map(item => item.node)
+      };
+    }
+    return {
+      status: "found",
+      control: scored[0].node,
+      candidateCount: scored.length,
+      reason: "",
+      candidates: scored.map(item => item.node)
+    };
+  }
+
+  function resolveConversationShareTrigger(root = document) {
+    const candidates = nodesIncludingRoot(root, "[data-testid='share-chat-button']")
+      .filter(node => node?.isConnected !== false)
+      .filter(node => !node?.closest?.("[data-testid^='conversation-turn-']"))
+      .filter(node => String(node?.getAttribute?.("data-testid") || "") !== "share-prompt-link-turn-action-button")
+      .filter(node => !node?.closest?.('[data-app-block-preview="true"]'))
+      .filter(node => {
+        const marker = [
+          node?.getAttribute?.("aria-label") || "",
+          node?.getAttribute?.("title") || "",
+          node?.getAttribute?.("data-testid") || "",
+          node?.className || ""
+        ].join(" ").replace(/\s+/g, " ").trim();
+        return !/(?:share[\s_-]*prompt|prompt[\s_-]*share)/i.test(marker);
+      })
+      .filter(isVisibleEnabledControl);
+    if (!candidates.length) {
+      return {
+        status: "missing",
+        control: null,
+        candidateCount: 0,
+        reason: "conversation share button was not found"
+      };
+    }
+    if (candidates.length !== 1) {
+      return {
+        status: "ambiguous",
+        control: null,
+        candidateCount: candidates.length,
+        reason: "multiple conversation share buttons were found",
+        candidates
+      };
+    }
+    return {
+      status: "found",
+      control: candidates[0],
+      candidateCount: 1,
+      reason: "",
+      candidates
+    };
+  }
+
+  function resolveVisualizeShareTriggerPlan(currentAssistantNode, { root = document } = {}) {
+    const response = resolveResponseShareTrigger(currentAssistantNode);
+    if (response.status === "found") {
+      return {
+        status: "found",
+        kind: "response",
+        response,
+        conversation: null,
+        control: response.control,
+        reason: ""
+      };
+    }
+    if (response.status === "ambiguous") {
+      return {
+        status: "blocked",
+        kind: "response",
+        response,
+        conversation: null,
+        control: null,
+        reason: response.reason
+      };
+    }
+    const conversation = resolveConversationShareTrigger(root);
+    if (conversation.status === "found") {
+      return {
+        status: "found",
+        kind: "conversation",
+        response,
+        conversation,
+        control: conversation.control,
+        reason: ""
+      };
+    }
+    return {
+      status: "unavailable",
+      kind: "none",
+      response,
+      conversation,
+      control: null,
+      reason: "response-specific share is missing and conversation share is unavailable"
+    };
+  }
+
+  function findResponseShareButton(currentAssistantNode) {
+    const resolution = resolveResponseShareTrigger(currentAssistantNode);
+    if (resolution.status !== "found") return null;
+    return resolution.control;
+  }
+
   function artifactRowPreferenceScore(item) {
     if (!item) return -1;
     const rowState = elementVisibilityDetails(item.row);
@@ -1337,7 +4404,7 @@
       "[role='button']",
       "[data-file-name]",
       "[data-filename]"
-    ].join(",")));
+    ].join(","))).filter(node => !isInsideUnsupportedRichAppBlock(node));
     const rows = [];
 
     for (const node of nodes) {
@@ -1377,7 +4444,9 @@
     if (!container?.querySelectorAll) return 0;
     let clicked = 0;
     for (let pass = 0; pass < 4; pass++) {
-      const controls = Array.from(container.querySelectorAll("button")).filter(isCollapsedArtifactListControl);
+      const controls = Array.from(container.querySelectorAll("button"))
+        .filter(control => !isInsideUnsupportedRichAppBlock(control))
+        .filter(isCollapsedArtifactListControl);
       if (!controls.length) break;
       controls.forEach(control => {
         try {
@@ -2634,7 +5703,7 @@
       "[aria-label*='file' i]",
       "[aria-label*='파일' i]",
       "[title*='download' i]"
-    ].join(",")));
+    ].join(","))).filter(node => !isInsideUnsupportedRichAppBlock(node));
 
     const seen = new Map();
     const candidates = [];
@@ -2672,8 +5741,8 @@
   }
 
   function hasSynchronousReadableHtmlSource(container) {
-    if (!container?.querySelector) return false;
-    return !!container.querySelector([
+    if (!container?.querySelectorAll && !container?.querySelector) return false;
+    const selector = [
       "iframe[srcdoc]",
       "iframe[src^='blob:']",
       "iframe[src^='data:']",
@@ -2682,7 +5751,8 @@
       "[role='textbox'][contenteditable='true']",
       ".cm-editor",
       "pre code"
-    ].join(","));
+    ].join(",");
+    return hasNonRichSelectorMatch(container, selector);
   }
 
   function findUserActivatedDownloadCandidate(btn) {
@@ -2758,7 +5828,8 @@
     const files = [];
     if (!container) return files;
 
-    const frames = Array.from(container.querySelectorAll("iframe"));
+    const frames = Array.from(container.querySelectorAll("iframe"))
+      .filter(frame => !isInsideUnsupportedRichAppBlock(frame));
     const fallbackNames = Array.from(new Set([
       ...expectedNames,
       ...candidates.map(candidate => candidate?.name || "")
@@ -2866,7 +5937,9 @@
   function collectInteractiveArtifactDescriptors(container, expectedNames = [], candidates = []) {
     if (!container?.querySelectorAll) return [];
     const descriptors = [];
-    const toggles = Array.from(container.querySelectorAll("button")).filter(isArtifactCodeToggle);
+    const toggles = Array.from(container.querySelectorAll("button"))
+      .filter(button => !isInsideUnsupportedRichAppBlock(button))
+      .filter(isArtifactCodeToggle);
     toggles.forEach(codeToggle => {
       const root = findArtifactRoot(codeToggle, container);
       if (!root || descriptors.some(item => item.root === root)) return;
@@ -2938,14 +6011,24 @@
     });
     if (candidateMatch) return true;
 
-    const visibleNames = filenamesFromText(container?.innerText || container?.textContent || "");
+    let visibleArtifactText = container?.innerText || container?.textContent || "";
+    try {
+      const clone = container?.cloneNode?.(true);
+      if (clone) {
+        removeUnsupportedRichAppBlocks(clone);
+        visibleArtifactText = clone.innerText || clone.textContent || "";
+      }
+    } catch {}
+    const visibleNames = filenamesFromText(visibleArtifactText);
     const hasHtmlName = [...expectedNames, ...visibleNames].some(name => /\.html?$/i.test(name || ""));
     if (!hasHtmlName || !container?.querySelectorAll) return false;
 
-    const buttons = Array.from(container.querySelectorAll("button"));
+    const buttons = Array.from(container.querySelectorAll("button"))
+      .filter(button => !isInsideUnsupportedRichAppBlock(button));
     const hasCodeToggle = buttons.some(button => /^(?:code|coding|코드|코딩)$/i.test(controlLabel(button)));
     const hasPreviewToggle = buttons.some(isArtifactPreviewToggle);
-    const hasViewer = !!container.querySelector?.("iframe, .cm-editor, pre.cm-content, .cm-content, [data-testid*='artifact' i]");
+    const viewerSelector = "iframe, .cm-editor, pre.cm-content, .cm-content, [data-testid*='artifact' i]";
+    const hasViewer = hasNonRichSelectorMatch(container, viewerSelector);
     return hasCodeToggle && hasPreviewToggle && hasViewer;
   }
 
@@ -3190,6 +6273,13 @@
     });
   }
 
+  function requestClipboardReadPermission() {
+    return sendExtensionMessage(
+      { type: CLIPBOARD_PERMISSION_REQUEST_TYPE },
+      { phase: "clipboard-read-permission" }
+    ).then(result => result?.ok === true && result?.granted === true, () => false);
+  }
+
   async function pingExtensionRuntime(phase = "runtime-ping", options = {}) {
     const sender = options.sendMessage || sendExtensionMessage;
     const timeoutMs = Number.isFinite(options.timeoutMs)
@@ -3234,6 +6324,34 @@
       source: "runtime-ping-failed",
       phase
     });
+  }
+
+  async function pingNativeHelper(phase = "native-preflight", options = {}) {
+    const runtimeGuard = options.runtimeGuard || null;
+    const sender = options.sendMessage || sendExtensionMessage;
+    const timeoutMs = Number.isFinite(options.timeoutMs)
+      ? Math.max(1, options.timeoutMs)
+      : NATIVE_PREFLIGHT_TIMEOUT_MS;
+    const runtimeStatus = await checkRuntimeGuard(runtimeGuard, phase);
+    if (!runtimeStatus?.ok) return runtimeStatus;
+    let timer = null;
+    try {
+      const response = await Promise.race([
+        Promise.resolve(sender({ type: NATIVE_PREFLIGHT_TYPE, phase }, { phase })),
+        new Promise(resolve => {
+          timer = setTimeout(() => resolve({ ok: false, error: `Native helper preflight timed out after ${timeoutMs}ms` }), timeoutMs);
+        })
+      ]);
+      if (timer !== null) clearTimeout(timer);
+      if (response?.ok && response?.pong === true && response?.native === true) {
+        return { ok: true, pong: true, native: true, phase };
+      }
+      if (isExtensionRuntimeFailure(response)) return response;
+      return { ok: false, error: response?.error || "Native helper preflight failed", phase };
+    } catch (error) {
+      if (timer !== null) clearTimeout(timer);
+      return { ok: false, error: error?.message || String(error), phase };
+    }
   }
 
   function createRuntimeGuard(options = {}) {
@@ -3642,7 +6760,7 @@
   function cleanAnswerText(text) {
     if (!text) return "";
     const lines = text.split(/\r?\n/).filter(l => !/^obsidian:\/\/\S+/i.test(l.trim()));
-    return lines.join("\n").trim();
+    return removeEmptyMarkdownLinkTargets(lines.join("\n")).trim();
   }
 
   function removeInternalAttachmentMarkers(text) {
@@ -3676,10 +6794,621 @@
     try { return await navigator.clipboard.readText(); } catch { return ""; }
   }
 
-  async function handleCopyClick(btn, { preferClipboard = false, delayMs = 80 } = {}) {
+  function requestVisualizeShareConsent({ requestPermission = requestClipboardReadPermission, consentMode = "visualize" } = {}) {
+    const isRichAppContinuation = consentMode === "rich-app-continuation";
+    const isConversationShare = consentMode === "conversation";
+    return new Promise(resolve => {
+      let host = null;
+      let continueButton = null;
+      let cancelButton = null;
+      let keyHandler = null;
+      let settled = false;
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        try { continueButton?.removeEventListener?.("click", continueHandler); } catch {}
+        try { cancelButton?.removeEventListener?.("click", cancelHandler); } catch {}
+        try { keyHandler && globalThis.removeEventListener?.("keydown", keyHandler, true); } catch {}
+        try { host?.remove?.(); } catch {}
+        host = null;
+        continueButton = null;
+        cancelButton = null;
+        keyHandler = null;
+        resolve({
+          approved: result?.approved === true,
+          permissionGranted: result?.permissionGranted === true
+        });
+      };
+      const cancelHandler = event => {
+        event?.preventDefault?.();
+        finish({ approved: false, permissionGranted: false });
+      };
+      const continueHandler = event => {
+        event?.preventDefault?.();
+        if (settled) return;
+        if (continueButton) continueButton.disabled = true;
+        let permissionPromise;
+        try {
+          // This call must stay synchronous inside the extension-owned button
+          // click so Chrome can associate the optional permission with it.
+          permissionPromise = Promise.resolve(requestPermission());
+        } catch {
+          permissionPromise = Promise.resolve(false);
+        }
+        permissionPromise.then(
+          granted => finish({ approved: true, permissionGranted: granted === true }),
+          () => finish({ approved: true, permissionGranted: false })
+        );
+      };
+
+      try {
+        host = document.createElement("div");
+        host.setAttribute("data-gpt2obs-visualize-consent", "true");
+        const shadow = host.attachShadow?.({ mode: "closed" });
+        if (!shadow) throw new Error("shadow-root-unavailable");
+        shadow.innerHTML = `
+          <style>
+            :host { all: initial; }
+            .backdrop { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; background: rgba(0,0,0,.58); font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+            .panel { width: min(620px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 32px)); overflow: auto; box-sizing: border-box; border-radius: 14px; background: #fff; color: #111; padding: 22px; box-shadow: 0 18px 70px rgba(0,0,0,.38); }
+            h2 { margin: 0 0 12px; font-size: 20px; }
+            p { margin: 0; white-space: pre-wrap; line-height: 1.5; font-size: 14px; }
+            .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+            button { border: 1px solid #999; border-radius: 8px; padding: 9px 14px; background: #fff; color: #111; font: inherit; cursor: pointer; }
+            button[data-gpt2obs-consent-continue] { border-color: #111; background: #111; color: #fff; }
+            button:disabled { cursor: wait; opacity: .65; }
+          </style>
+          <div class="backdrop" role="presentation">
+            <section class="panel" role="dialog" aria-modal="true" aria-labelledby="gpt2obs-consent-title">
+              <h2 id="gpt2obs-consent-title"></h2>
+              <p data-gpt2obs-consent-body></p>
+              <div class="actions">
+                <button type="button" data-gpt2obs-consent-cancel></button>
+                <button type="button" data-gpt2obs-consent-continue></button>
+              </div>
+            </section>
+          </div>`;
+        shadow.querySelector("#gpt2obs-consent-title").textContent = t(
+          isConversationShare
+            ? "conversationShareConsentTitle"
+            : isRichAppContinuation
+              ? "richAppConsentTitle"
+              : "visualizeConsentTitle"
+        );
+        shadow.querySelector("[data-gpt2obs-consent-body]").textContent = t(
+          isConversationShare
+            ? "conversationShareConfirm"
+            : isRichAppContinuation
+              ? "richAppShareConfirm"
+              : "visualizeShareConfirm"
+        );
+        continueButton = shadow.querySelector("[data-gpt2obs-consent-continue]");
+        cancelButton = shadow.querySelector("[data-gpt2obs-consent-cancel]");
+        continueButton.textContent = t("visualizeConsentContinue");
+        cancelButton.textContent = t("visualizeConsentCancel");
+        continueButton.addEventListener("click", continueHandler);
+        cancelButton.addEventListener("click", cancelHandler);
+        keyHandler = event => {
+          if (event?.key === "Escape") cancelHandler(event);
+        };
+        globalThis.addEventListener?.("keydown", keyHandler, true);
+        (document.body || document.documentElement).appendChild(host);
+        continueButton.focus?.();
+      } catch {
+        finish({ approved: false, permissionGranted: false });
+      }
+    });
+  }
+
+  // An existing whole-conversation link can be stale when the current
+  // assistant response was added after the link was created. Keep this
+  // approval separate from the initial share consent so an Update action is
+  // never performed implicitly. Callers may inject a confirmation function in
+  // tests; production uses the page's native confirmation surface because no
+  // clipboard permission is involved in this second decision.
+  function requestConversationShareUpdateConsent({ confirmFn = globalThis.confirm } = {}) {
+    let approved = false;
+    try {
+      approved = typeof confirmFn === "function" && confirmFn(t("conversationShareUpdateConfirm")) === true;
+    } catch {
+      approved = false;
+    }
+    return Promise.resolve({ approved });
+  }
+
+  function requestManualVisualizeShareUrl() {
+    return new Promise(resolve => {
+      let host = null;
+      let input = null;
+      let form = null;
+      let keyHandler = null;
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        if (input) input.value = "";
+        try { form?.removeEventListener?.("submit", submitHandler); } catch {}
+        try { keyHandler && globalThis.removeEventListener?.("keydown", keyHandler, true); } catch {}
+        try { host?.remove?.(); } catch {}
+        host = null;
+        input = null;
+        form = null;
+        keyHandler = null;
+        resolve(String(value || ""));
+      };
+      const submitHandler = event => {
+        event?.preventDefault?.();
+        const value = String(input?.value || "");
+        const validated = validateStrictChatGptShareUrl(value);
+        const error = form?.querySelector?.("[data-gpt2obs-manual-error]");
+        if (!validated) {
+          if (error) {
+            error.textContent = t("visualizeManualShareInvalid");
+            error.hidden = false;
+          }
+          return;
+        }
+        finish(validated);
+      };
+
+      try {
+        host = document.createElement("div");
+        host.setAttribute("data-gpt2obs-manual-share", "true");
+        const shadow = host.attachShadow?.({ mode: "closed" });
+        if (!shadow) throw new Error("shadow-root-unavailable");
+        shadow.innerHTML = `
+          <style>
+            :host { all: initial; }
+            .backdrop { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; background: rgba(0,0,0,.58); font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+            .panel { width: min(560px, calc(100vw - 32px)); box-sizing: border-box; border-radius: 14px; background: #fff; color: #111; padding: 22px; box-shadow: 0 18px 70px rgba(0,0,0,.38); }
+            h2 { margin: 0 0 10px; font-size: 20px; } p { margin: 0 0 14px; line-height: 1.45; }
+            input { width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid #777; border-radius: 8px; font-size: 15px; }
+            .error { color: #b42318; min-height: 1.4em; margin-top: 8px; font-size: 13px; }
+            .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+            button { border: 1px solid #999; border-radius: 8px; padding: 9px 14px; background: #fff; color: #111; font: inherit; cursor: pointer; }
+            button[type="submit"] { border-color: #111; background: #111; color: #fff; }
+          </style>
+          <div class="backdrop" role="presentation">
+            <form class="panel" aria-labelledby="gpt2obs-manual-title">
+              <h2 id="gpt2obs-manual-title"></h2>
+              <p data-gpt2obs-manual-body></p>
+              <input type="url" autocomplete="off" spellcheck="false" value="" required />
+              <div class="error" data-gpt2obs-manual-error hidden></div>
+              <div class="actions">
+                <button type="button" data-gpt2obs-manual-cancel></button>
+                <button type="submit" data-gpt2obs-manual-save></button>
+              </div>
+            </form>
+          </div>`;
+        shadow.querySelector("#gpt2obs-manual-title").textContent = t("visualizeManualShareTitle");
+        shadow.querySelector("[data-gpt2obs-manual-body]").textContent = t("visualizeManualShareBody");
+        shadow.querySelector("[data-gpt2obs-manual-save]").textContent = t("visualizeManualShareSave");
+        shadow.querySelector("[data-gpt2obs-manual-cancel]").textContent = t("visualizeManualShareCancel");
+        input = shadow.querySelector("input");
+        input.placeholder = t("visualizeManualSharePlaceholder");
+        form = shadow.querySelector("form");
+        form.addEventListener("submit", submitHandler);
+        shadow.querySelector("[data-gpt2obs-manual-cancel]").addEventListener("click", () => finish(""), { once: true });
+        keyHandler = event => {
+          if (event?.key === "Escape") {
+            event.preventDefault?.();
+            finish("");
+          }
+        };
+        globalThis.addEventListener?.("keydown", keyHandler, true);
+        (document.body || document.documentElement).appendChild(host);
+        input.focus?.();
+      } catch {
+        try { host?.remove?.(); } catch {}
+        host = null;
+        const promptFn = typeof globalThis.prompt === "function" ? globalThis.prompt : null;
+        if (!promptFn) {
+          finish("");
+          return;
+        }
+        let value = "";
+        try { value = promptFn(t("visualizeManualShareBody"), "") || ""; } catch {}
+        finish(value);
+      }
+    });
+  }
+
+  function visualizeShareFailureMessage(result, mode = "") {
+    const failureKey = mode === "conversation"
+      ? "conversationShareFailedPrefix"
+      : mode === "rich-app-continuation"
+        ? "richAppShareFailedPrefix"
+        : "visualizeShareFailedPrefix";
+    return formatI18nTemplate(t(failureKey), {
+      stage: result?.stage || "unknown",
+      reason: result?.reason || "unknown error"
+    });
+  }
+
+  async function handleVisualizeShareSave({
+    btn,
+    currentAssistantNode,
+    previousQa,
+    visualizeContext = null,
+    runtimeGuard,
+    sourceUrl = location.href,
+    confirmFn = globalThis.confirm,
+    alertFn = globalThis.alert,
+    preflightFn = prepareVisualizeSharePreflight,
+    createShareLinkFn = createOrReuseVisualizeShareLink,
+    requestClipboardReadPermissionFn = requestClipboardReadPermission,
+    requestShareConsentFn = requestVisualizeShareConsent,
+    requestConversationShareUpdateConsentFn = requestConversationShareUpdateConsent,
+    sharePlan = null,
+    shareCapabilityPreflight = false,
+    preflightOptions = {},
+    shareOptions = {},
+    extractDownloadFilesFn = extractDownloadFiles,
+    saveObsidianNoteFn = saveObsidianNote
+  } = {}) {
+    // Keep share state outside the failure renderer so failures after a
+    // successful Create/Update action can report the exact state without
+    // losing the validated URL.
+    let shareSource = "";
+    let shareCreatedThisAttempt = false;
+    let shareUpdatedThisAttempt = false;
+    let validatedShareUrl = "";
+    let shareInteraction = "";
+    let conversationShareActionOccurred = false;
+    const showFailure = (result, afterShare = false) => {
+      let failure = result || { ok: false, stage: "unknown", reason: "unknown error" };
+      if (afterShare) {
+        failure = {
+          ...failure,
+          shareKind: failure.shareKind || effectiveShareKind,
+          shareSource: failure.shareSource || shareSource,
+          shareCreatedThisAttempt: failure.shareCreatedThisAttempt === true || shareCreatedThisAttempt,
+          shareUpdatedThisAttempt: failure.shareUpdatedThisAttempt === true || shareUpdatedThisAttempt,
+          validatedShareUrl: failure.validatedShareUrl || validatedShareUrl,
+          shareInteraction: failure.shareInteraction || shareInteraction,
+          conversationShareActionOccurred: failure.conversationShareActionOccurred === true || conversationShareActionOccurred
+        };
+      }
+      const failureMode = failure?.shareKind === "conversation"
+        ? "conversation"
+        : failure?.mode || preflight?.mode || visualizeContext?.mode || "";
+      try { alertFn(visualizeShareFailureMessage(failure, failureMode)); } catch {}
+      if (afterShare && (failure?.shareCreatedThisAttempt || failure?.shareUpdatedThisAttempt || failure?.conversationShareActionOccurred)) {
+        const isConversation = failure?.shareKind === "conversation";
+        const warningKey = isConversation
+          ? (failure?.shareInteraction === "instant-copy"
+            ? "conversationShareCopiedButSaveFailed"
+            : (failure?.validatedShareUrl ? "conversationShareChangedButSaveFailed" : "conversationShareChangeAttemptUnverified"))
+          : (failure?.validatedShareUrl ? "visualizeShareCreatedButSaveFailed" : "visualizeShareCreateAttemptUnverified");
+        try { alertFn(t(warningKey)); } catch {}
+      }
+      return failure;
+    };
+
+    let preflight;
+    try {
+      preflight = await preflightFn({
+        ...preflightOptions,
+        currentAssistantNode,
+        previousQa,
+        visualizeContext,
+        sourceUrl,
+        btn,
+        runtimeGuard
+      });
+    } catch (error) {
+      return showFailure({ ok: false, stage: "preflight", reason: error?.message || String(error) });
+    }
+    if (!preflight?.ok) return showFailure(preflight || { ok: false, stage: "preflight", reason: "preflight failed" });
+
+    const effectiveMode = preflight.mode || visualizeContext?.mode || "previous-qa";
+    let resolvedSharePlan = sharePlan;
+    if (shareCapabilityPreflight) {
+      if (!resolvedSharePlan || resolvedSharePlan.status !== "found") {
+        try {
+          resolvedSharePlan = resolveVisualizeShareTriggerPlan(currentAssistantNode, {
+            root: shareOptions.root || document
+          });
+        } catch (error) {
+          resolvedSharePlan = { status: "unavailable", kind: "none", reason: error?.message || "share capability resolution failed" };
+        }
+      }
+      if (resolvedSharePlan?.status !== "found" || !resolvedSharePlan?.control) {
+        const capabilityMode = resolvedSharePlan?.kind === "conversation" ? "conversation" : effectiveMode;
+        return showFailure({
+          ok: false,
+          stage: "share-button",
+          reason: resolvedSharePlan?.reason || "no unambiguous share trigger is available",
+          mode: effectiveMode,
+          shareKind: capabilityMode === "conversation" ? "conversation" : "response"
+        });
+      }
+    }
+    const effectiveShareKind = resolvedSharePlan?.kind === "conversation" ? "conversation" : "response";
+    const effectivePreviousQa = effectiveMode === "previous-qa"
+      ? (previousQa || visualizeContext || null)
+      : null;
+    const targetTurnId = String(preflight.targetTurnId || currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']")?.getAttribute?.("data-turn-id") || "").trim();
+    if (effectiveShareKind === "conversation") {
+      const conversationDraft = buildConversationShareMarkdownDraft({
+        title: preflight.title,
+        sourceUrl,
+        bodyMode: effectiveMode,
+        questionText: preflight.questionText || visualizeContext?.questionText || effectivePreviousQa?.questionText || "",
+        answerText: effectivePreviousQa?.answerText || preflight.answerText || "",
+        explanationText: preflight.explanationText || visualizeContext?.explanationText || "",
+        targetTurnId,
+        richArtifactsExpected: preflight.richArtifactsExpected
+      });
+      if (!conversationDraft) {
+        return showFailure({
+          ok: false,
+          stage: "preflight",
+          reason: "conversation share Markdown could not be assembled",
+          mode: effectiveMode,
+          shareKind: "conversation"
+        });
+      }
+    }
+    const preflightOverall = combineCaptureIntegrity(preflight.fileIntegrity, preflight.localRichIntegrity);
+    let allowPartialAttachments = false;
+    let allowPartialRich = false;
+    const preSaveKey = `${sourceUrl}::visualize-share::${preflight.title}::${preflight.richArtifactsExpected}`;
+    if (state.activeSaves.has(preSaveKey) || isDuplicateContentSave(preSaveKey)) return { ok: false, stage: "duplicate", reason: "duplicate save suppressed" };
+    state.activeSaves.add(preSaveKey);
+    let saveSucceeded = false;
+    let saveAttempted = false;
+    try {
+      if (!preflightOverall.complete) {
+        const allowPartial = confirmIncompleteCaptureSave(preflightOverall, confirmFn);
+        if (!allowPartial) return { ok: false, stage: "preflight", reason: "incomplete file or local rich capture was cancelled" };
+        allowPartialAttachments = !preflight.fileIntegrity.complete;
+        allowPartialRich = !preflight.localRichIntegrity.complete;
+      }
+
+      let consentResult;
+      try {
+        consentResult = await requestShareConsentFn({
+          requestPermission: requestClipboardReadPermissionFn,
+          consentMode: effectiveShareKind === "conversation" ? "conversation" : effectiveMode
+        });
+      } catch (error) {
+        return showFailure({ ok: false, stage: "share-confirm", reason: error?.message || "Visualize share consent UI failed" });
+      }
+      if (consentResult?.approved !== true) {
+        return { ok: false, stage: "share-confirm", reason: "user cancelled Visualize share consent" };
+      }
+      const clipboardPermissionGranted = consentResult.permissionGranted === true;
+      const runtimeStatus = await checkRuntimeGuard(runtimeGuard, "visualize-share-before-click");
+      if (!runtimeStatus?.ok) return showFailure({ ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" });
+
+      let shareResult;
+      try {
+        shareResult = await createShareLinkFn(currentAssistantNode, {
+          ...shareOptions,
+          runtimeGuard,
+          root: shareOptions.root || document,
+          shareKind: effectiveShareKind,
+          shareTrigger: resolvedSharePlan?.control || shareOptions.shareTrigger,
+          requestConversationShareUpdateConsent: shareOptions.requestConversationShareUpdateConsent || requestConversationShareUpdateConsentFn,
+          shareRoot: shareOptions.shareRoot || (effectiveShareKind === "conversation"
+            ? (shareOptions.root || document)
+            : closestArtifactContainer(btn) || currentAssistantNode),
+          clipboardPermissionGranted
+        });
+      } catch (error) {
+        return showFailure({ ok: false, stage: "share-button", reason: error?.message || String(error) });
+      }
+      if (!shareResult?.ok) {
+        const failedShareResult = shareResult || { ok: false, stage: "share-url", reason: "share link creation failed" };
+        return showFailure({
+          ...failedShareResult,
+          shareKind: failedShareResult.shareKind || effectiveShareKind,
+          shareSource: failedShareResult.shareSource || failedShareResult.source || "",
+          shareCreatedThisAttempt: failedShareResult.shareCreatedThisAttempt === true,
+          shareUpdatedThisAttempt: failedShareResult.shareUpdatedThisAttempt === true,
+          validatedShareUrl: validateStrictChatGptShareUrl(failedShareResult.validatedShareUrl || failedShareResult.url || "")
+        }, true);
+      }
+      shareSource = shareResult.source === "created" ? "created" : "existing";
+      shareCreatedThisAttempt = shareSource === "created";
+      shareUpdatedThisAttempt = shareResult.shareUpdatedThisAttempt === true;
+      shareInteraction = String(shareResult.shareInteraction || "").trim();
+      conversationShareActionOccurred = shareResult.conversationShareActionOccurred === true;
+      // The create helper normally returns its own strict-validated URL, but
+      // keep this boundary defensive for injected/custom helpers as well:
+      // relative paths or raw clipboard-like strings must never reach the
+      // Markdown/frontmatter builder.
+      validatedShareUrl = validateStrictChatGptShareUrl(shareResult.validatedShareUrl || shareResult.url || "");
+      if (!validatedShareUrl) {
+        return showFailure({ ok: false, stage: "share-url", reason: "share flow returned an invalid ChatGPT share URL", shareSource, shareCreatedThisAttempt, validatedShareUrl }, true);
+      }
+
+      let attachments = Array.isArray(preflight.readableFiles) ? preflight.readableFiles.slice() : [];
+      let downloadedAttachments = [];
+      let downloadedMarkdown = null;
+      let extractionWarnings = [];
+      const expectedFiles = preflight.fileIntegrity?.expectedDeliverableNames || [];
+      if (expectedFiles.length) {
+        const extraction = await extractDownloadFilesFn(
+          btn,
+          expectedFiles,
+          effectiveMode === "direct-visualize" || effectiveMode === "rich-app-continuation"
+            ? (preflight.explanationText || extractDirectVisualizeExplanation(currentAssistantNode))
+            : effectivePreviousQa?.answerText || "",
+          { runtimeGuard }
+        );
+        if (extraction.runtimeUnavailable || runtimeGuard?.isAborted?.()) {
+          return showFailure({
+            ok: false,
+            stage: "file-capture",
+            reason: extraction.runtimeFailure?.error || runtimeGuard?.getFailure?.()?.error || "file capture runtime failed",
+            shareSource,
+            shareCreatedThisAttempt,
+            validatedShareUrl
+          }, true);
+        }
+        const extractedFiles = Array.isArray(extraction.files) ? extraction.files : [];
+        attachments = extractedFiles.length ? extractedFiles : attachments;
+        downloadedAttachments = Array.isArray(extraction.downloadedFiles) ? extraction.downloadedFiles : [];
+        extractionWarnings = Array.from(new Set([...(extraction.warnings || []), ...(extraction.failures || []).map(item => `${item?.name || "file"}: ${item?.reason || "capture failed"}`)]));
+      }
+
+      const finalFileIntegrity = assessArtifactIntegrity({
+        fileLinks: preflight.fileLinks,
+        artifactRows: preflight.artifactRows,
+        attachments,
+        downloadedAttachments,
+        generatedMarkdown: {},
+        failures: []
+      });
+      if (!finalFileIntegrity.complete && !allowPartialAttachments) {
+        return showFailure({
+          ok: false,
+          stage: "file-capture",
+          reason: `file completeness changed after preflight: ${(finalFileIntegrity.missingNames || []).join(", ") || "unknown file"}`,
+          shareSource,
+          shareCreatedThisAttempt,
+          validatedShareUrl
+        }, true);
+      }
+      if (extractionWarnings.length) {
+        try { alertFn(t("generatedArtifactWarningPrefix") + extractionWarnings.join("\n")); } catch {}
+      }
+
+      let noteAnswerText = effectivePreviousQa?.answerText || "";
+      if (allowPartialRich && effectiveMode === "previous-qa") {
+        noteAnswerText = [buildMissingRichArtifactWarning(preflight.localRichIntegrity), noteAnswerText].filter(Boolean).join("\n\n");
+      }
+      const attachmentNames = finalFileIntegrity.expectedHtmlNames;
+      const attachmentMarker = attachments.length || downloadedAttachments.length ? "%%GPT_OBSIDIAN_ATTACHMENTS%%" : "";
+      const markdown = effectiveShareKind === "conversation"
+        ? buildConversationShareMarkdown({
+          title: preflight.title,
+          sourceUrl,
+          shareUrl: validatedShareUrl,
+          bodyMode: effectiveMode,
+          questionText: preflight.questionText || visualizeContext?.questionText || effectivePreviousQa?.questionText || "",
+          answerText: noteAnswerText,
+          explanationText: preflight.explanationText || visualizeContext?.explanationText || extractDirectVisualizeExplanation(currentAssistantNode),
+          targetTurnId,
+          attachmentMarker,
+          shareInteraction,
+          conversationShareFreshness: shareInteraction === "instant-copy" ? "unverified" : "",
+          richArtifactsExpected: preflight.richArtifactsExpected,
+          richArtifactsRemoteReferenced: preflight.richArtifactsExpected
+        })
+        : effectiveMode === "direct-visualize"
+        ? buildDirectVisualizeShareMarkdown({
+          title: preflight.title,
+          sourceUrl,
+          shareUrl: validatedShareUrl,
+          questionText: preflight.questionText || visualizeContext?.questionText || "",
+          explanationText: preflight.explanationText || visualizeContext?.explanationText || extractDirectVisualizeExplanation(currentAssistantNode),
+          attachmentMarker,
+          richArtifactsExpected: preflight.richArtifactsExpected,
+          richArtifactsRemoteReferenced: preflight.richArtifactsExpected
+        })
+        : effectiveMode === "rich-app-continuation"
+          ? buildRichAppContinuationShareMarkdown({
+            title: preflight.title,
+            sourceUrl,
+            shareUrl: validatedShareUrl,
+            questionText: preflight.questionText || visualizeContext?.questionText || "",
+            explanationText: preflight.explanationText || visualizeContext?.explanationText || extractDirectVisualizeExplanation(currentAssistantNode),
+            attachmentMarker,
+            richArtifactsExpected: preflight.richArtifactsExpected,
+            richArtifactsRemoteReferenced: preflight.richArtifactsExpected
+          })
+          : buildVisualizeShareMarkdown({
+          title: preflight.title,
+          sourceUrl,
+          shareUrl: validatedShareUrl,
+          questionText: effectivePreviousQa?.questionText || preflight.questionText || "",
+          answerText: noteAnswerText,
+          attachmentMarker,
+          captureMode: "previous-qa-visualize-share-link",
+          richArtifactsExpected: preflight.richArtifactsExpected,
+          richArtifactsRemoteReferenced: preflight.richArtifactsExpected
+        });
+      if (!markdown) {
+        return showFailure({ ok: false, stage: "markdown", reason: "final Visualize share Markdown could not be assembled", shareSource, shareCreatedThisAttempt, validatedShareUrl }, true);
+      }
+
+      saveAttempted = true;
+      let saveResponse;
+      try {
+        saveResponse = await saveObsidianNoteFn({
+          vaultName: settings.vaultName,
+          vaultPath: settings.vaultPath,
+          filePath: preflight.filePath,
+          content: markdown,
+          attachments,
+          downloadedAttachments,
+          downloadedMarkdown,
+          attachmentNames,
+          allowPartialAttachments,
+          htmlSaveDir: settings.htmlSaveDir,
+          fallbackUri: ""
+        }, { runtimeGuard, showAlert: alertFn });
+      } catch (error) {
+        return showFailure({
+          ok: false,
+          stage: "native-save",
+          reason: error?.message || String(error),
+          shareSource,
+          shareCreatedThisAttempt,
+          validatedShareUrl
+        }, true);
+      }
+      if (!saveResponse?.ok) {
+        return showFailure({
+          ok: false,
+          stage: "native-save",
+          reason: saveResponse?.error || "Native helper save failed",
+          shareSource,
+          shareCreatedThisAttempt,
+          validatedShareUrl
+        }, true);
+      }
+      saveSucceeded = true;
+      return {
+        ok: true,
+        mode: effectiveMode,
+        shareKind: effectiveShareKind,
+        shareSource,
+        shareCreatedThisAttempt,
+        shareUpdatedThisAttempt,
+        validatedShareUrl,
+        shareInteraction,
+        conversationShareActionOccurred,
+        dialogClosed: !!shareResult.dialogClosed,
+        saveResponse
+      };
+    } finally {
+      state.activeSaves.delete(preSaveKey);
+      if (!saveSucceeded) clearContentSaveReservation(preSaveKey);
+      if (saveAttempted && !saveSucceeded && (shareCreatedThisAttempt || shareUpdatedThisAttempt || conversationShareActionOccurred)) {
+        debugLog("ChatGPT share link remained active after Native save failure", {
+          shareSource,
+          shareCreatedThisAttempt,
+          shareUpdatedThisAttempt,
+          shareInteraction,
+          conversationShareActionOccurred,
+          hasValidatedShareUrl: !!validatedShareUrl
+        });
+      }
+    }
+  }
+
+  async function handleCopyClick(btn, options = {}) {
+    const preferClipboard = !!options.preferClipboard;
+    const delayMs = Number.isFinite(options.delayMs) ? options.delayMs : 80;
     const run = async () => {
       if (!isCurrentGeneration()) return;
-      const runtimeGuard = createRuntimeGuard();
+      const runtimeGuard = options.runtimeGuard || createRuntimeGuard();
+      const confirmFn = options.confirmFn || globalThis.confirm;
+      const alertFn = options.alertFn || globalThis.alert;
       const runtimeSyncStatus = runtimeGuard.checkSync("save-start");
       if (!runtimeSyncStatus?.ok) {
         runtimeGuard.notify();
@@ -3689,6 +7418,103 @@
       // the generated-file card receives the originating user click. Every
       // download/native boundary below awaits this same in-flight preflight.
       void runtimeGuard.check("save-start");
+      const currentAssistantNode = closestMessageContainer(btn);
+      const richExpected = collectRichAppBlockCandidates(currentAssistantNode);
+      const previousQaFinder = options.findPreviousQaPairFn || findPreviousQaPair;
+      let previousQaCandidate = null;
+      if (options.findPreviousQaPairFn) {
+        try { previousQaCandidate = options.findPreviousQaPairFn(currentAssistantNode); } catch {}
+      }
+      const messageNodes = getAllMessageNodes();
+      const currentIndex = findMessageNodeIndex(messageNodes, currentAssistantNode);
+      const previousRequest = findPreviousMessageByRole(messageNodes, currentIndex, "user")?.node || previousQaCandidate?.requestNode || null;
+      const structuredVisualizeCandidate = isVisualizeShareCandidate(currentAssistantNode, { requestNode: previousRequest });
+      if (structuredVisualizeCandidate) {
+        let visualizeContext = null;
+        try { visualizeContext = resolveVisualizeSaveContext(currentAssistantNode); } catch (error) {
+          visualizeContext = { mode: "unresolved", reason: error?.message || "Visualize context resolution failed" };
+        }
+        // Test callers and older integrations may provide an explicit finder
+        // for a detached fixture. Keep that override narrowly scoped; the
+        // production path never falls back from a failed direct resolution to
+        // an unrelated earlier Q/A pair.
+        if (visualizeContext?.mode === "unresolved" && options.findPreviousQaPairFn) {
+          if (!previousQaCandidate) {
+            try { previousQaCandidate = previousQaFinder(currentAssistantNode); } catch {}
+          }
+          if (previousQaCandidate?.questionText && previousQaCandidate?.answerText && previousQaCandidate?.answerNode) {
+            visualizeContext = {
+              mode: "previous-qa",
+              questionNode: previousQaCandidate.questionNode || null,
+              answerNode: previousQaCandidate.answerNode,
+              visualizeRequestNode: previousQaCandidate.requestNode,
+              visualizeAnswerNode: currentAssistantNode,
+              questionText: previousQaCandidate.questionText,
+              answerText: previousQaCandidate.answerText
+            };
+          }
+        }
+        if (!visualizeContext || visualizeContext.mode === "unresolved") {
+          const failure = { ok: false, stage: "preflight", reason: visualizeContext?.reason || "Visualize Q1/A1 pair could not be resolved" };
+          try { alertFn(visualizeShareFailureMessage(failure)); } catch {}
+          return failure;
+        }
+        const resolvedPreviousQa = visualizeContext.mode === "previous-qa"
+          ? {
+            questionNode: visualizeContext.questionNode,
+            answerNode: visualizeContext.answerNode,
+            requestNode: visualizeContext.visualizeRequestNode,
+            questionText: visualizeContext.questionText,
+            answerText: visualizeContext.answerText
+          }
+          : null;
+        return handleVisualizeShareSave({
+          btn,
+          currentAssistantNode,
+          previousQa: resolvedPreviousQa,
+          visualizeContext,
+          runtimeGuard,
+          sourceUrl: location.href,
+          confirmFn,
+          alertFn,
+          preflightFn: options.preflightFn || prepareVisualizeSharePreflight,
+          createShareLinkFn: options.createShareLinkFn || createOrReuseVisualizeShareLink,
+          requestClipboardReadPermissionFn: options.requestClipboardReadPermissionFn || requestClipboardReadPermission,
+          requestShareConsentFn: options.requestShareConsentFn || requestVisualizeShareConsent,
+          requestConversationShareUpdateConsentFn: options.requestConversationShareUpdateConsentFn || requestConversationShareUpdateConsent,
+          shareCapabilityPreflight: typeof options.createShareLinkFn !== "function",
+          preflightOptions: options.preflightOptions || {},
+          shareOptions: options.shareOptions || {},
+          extractDownloadFilesFn: options.extractDownloadFilesFn || extractDownloadFiles,
+          saveObsidianNoteFn: options.saveObsidianNoteFn || saveObsidianNote
+        });
+      }
+      let continuationContext = null;
+      try { continuationContext = resolveRichAppContinuationContext(currentAssistantNode); } catch (error) {
+        continuationContext = { mode: "unresolved", reason: error?.message || "rich app continuation resolution failed" };
+      }
+      if (continuationContext?.mode === "rich-app-continuation") {
+        return handleVisualizeShareSave({
+          btn,
+          currentAssistantNode,
+          previousQa: null,
+          visualizeContext: continuationContext,
+          runtimeGuard,
+          sourceUrl: location.href,
+          confirmFn,
+          alertFn,
+          preflightFn: options.preflightFn || prepareVisualizeSharePreflight,
+          createShareLinkFn: options.createShareLinkFn || createOrReuseVisualizeShareLink,
+          requestClipboardReadPermissionFn: options.requestClipboardReadPermissionFn || requestClipboardReadPermission,
+          requestShareConsentFn: options.requestShareConsentFn || requestVisualizeShareConsent,
+          requestConversationShareUpdateConsentFn: options.requestConversationShareUpdateConsentFn || requestConversationShareUpdateConsent,
+          shareCapabilityPreflight: typeof options.createShareLinkFn !== "function",
+          preflightOptions: options.preflightOptions || {},
+          shareOptions: options.shareOptions || {},
+          extractDownloadFilesFn: options.extractDownloadFilesFn || extractDownloadFiles,
+          saveObsidianNoteFn: options.saveObsidianNoteFn || saveObsidianNote
+        });
+      }
       let answerText = preferClipboard ? await readClipboardSafe() : "";
       // If clipboard is just an Obsidian test URI, prefer DOM extraction.
       if (answerText && /^obsidian:\/\/\S+/i.test(answerText.trim())) {
@@ -3698,9 +7524,10 @@
       answerText = htmlOrClipboardToMarkdown(btn, answerText, preferClipboard);
       if (!answerText || answerText.length < 3) {
         // final fallback: plain text from DOM
-        const container = closestMessageContainer(btn);
-        const clone = container?.cloneNode(true);
-        clone?.querySelectorAll('button, nav, menu').forEach(n=>n.remove());
+        const clone = currentAssistantNode?.cloneNode(true);
+        normalizeFileCitationChips(clone);
+        removeUnsupportedRichAppBlocks(clone);
+        removeNonAnswerChrome(clone);
         answerText = clone?.innerText?.trim() || "";
       }
       answerText = convertGeneratedHtmlToMarkdown(answerText);
@@ -3708,12 +7535,12 @@
       const questionText = findPrevUserMessageText(btn);
       answerText = cleanAnswerText(answerText);
       answerText = stripChatGptFooterLines(answerText);
-      const preSaveKey = `${location.href}::${answerText.length}::${questionText.slice(0, 120)}`;
+      const preSaveKey = `${location.href}::${answerText.length}::rich-${richExpected.length}::${questionText.slice(0, 120)}`;
       if (state.activeSaves.has(preSaveKey)) return;
       if (isDuplicateContentSave(preSaveKey)) return;
       state.activeSaves.add(preSaveKey);
+      let saveAttempted = false;
       try {
-      const currentAssistantNode = closestMessageContainer(btn);
       const artifactContainer = closestArtifactContainer(btn) || currentAssistantNode;
       const generatedMarkdown = await extractGeneratedMarkdownArtifact(artifactContainer, { runtimeGuard });
       if (generatedMarkdown.runtimeUnavailable || runtimeGuard.isAborted()) {
@@ -3730,29 +7557,67 @@
       }
       const attachments = extraction.files;
       const downloadedAttachments = extraction.downloadedFiles;
-      const attachmentNames = [];
       const hasRealHtmlAttachment = attachments.length > 0 || downloadedAttachments.length > 0;
       const downloadedMarkdown = generatedMarkdown.downloadedMarkdown || null;
       const hasDetailedMarkdown = !!generatedMarkdown.markdown || !!downloadedMarkdown;
+      const previousQa = (settings.usePreviousQaForHtml && hasRealHtmlAttachment)
+        ? previousQaFinder(currentAssistantNode)
+        : null;
+      const fileLinks = collectFileLikeLinks(artifactContainer);
+      const artifactRows = collectArtifactFileRows(artifactContainer, FILE_DELIVERABLE_EXTENSIONS);
+      const fileIntegrity = assessArtifactIntegrity({
+        fileLinks,
+        artifactRows,
+        attachments,
+        downloadedAttachments,
+        generatedMarkdown,
+        failures: extraction.failures
+      });
+      const storedRichExpected = collectRichArtifactCandidatesForStoredNote(currentAssistantNode, {
+        previousQa,
+        usePreviousQaForHtml: !!settings.usePreviousQaForHtml && hasRealHtmlAttachment
+      });
+      const richIntegrity = assessRichArtifactIntegrity({ expected: storedRichExpected, captures: [] });
+      const overallIntegrity = combineCaptureIntegrity(fileIntegrity, richIntegrity);
+      let allowPartialAttachments = false;
+      let allowPartialRich = false;
+      if (!overallIntegrity.complete) {
+        const allowPartialSave = confirmIncompleteCaptureSave(overallIntegrity, confirmFn);
+        if (!allowPartialSave) {
+          debugLog("save cancelled because capture was incomplete", overallIntegrity);
+          return;
+        }
+        allowPartialAttachments = !fileIntegrity.complete;
+        allowPartialRich = !richIntegrity.complete;
+      }
+      const attachmentNames = fileIntegrity.expectedHtmlNames;
       const extractionWarnings = Array.from(new Set([
         ...(generatedMarkdown.warnings || []),
-        ...(extraction.warnings || [])
+        ...(extraction.warnings || []),
+        ...(fileIntegrity.failureDetails || [])
       ].filter(Boolean)));
       if (!hasRealHtmlAttachment && extraction.clickedFallback > 0) {
-        alert(t("htmlArtifactCaptureFailedWarning"));
+        alertFn(t("htmlArtifactCaptureFailedWarning"));
       }
       if (extractionWarnings.length) {
-        alert(t("generatedArtifactWarningPrefix") + extractionWarnings.join("\n"));
+        alertFn(t("generatedArtifactWarningPrefix") + extractionWarnings.join("\n"));
       }
-      const previousQa = (settings.usePreviousQaForHtml && hasRealHtmlAttachment)
-        ? findPreviousQaPair(currentAssistantNode)
-        : null;
       const useOriginalQaHeadings = !!previousQa;
       let noteQuestionText = previousQa?.questionText || questionText;
       let noteAnswerText = previousQa?.answerText || answerText;
       if (hasRealHtmlAttachment) {
         noteQuestionText = removeInternalAttachmentMarkers(noteQuestionText);
         noteAnswerText = removeInternalAttachmentMarkers(noteAnswerText);
+      }
+      const captureMetadata = allowPartialRich ? {
+        captureStatus: "partial",
+        richArtifactsExpected: richIntegrity.expectedCount,
+        richArtifactsComplete: richIntegrity.completeCount
+      } : null;
+      if (allowPartialRich) {
+        noteAnswerText = [buildMissingRichArtifactWarning(richIntegrity), noteAnswerText]
+          .filter(Boolean)
+          .join("\n\n");
       }
       const title = makeTitle(noteQuestionText || noteAnswerText);
       const filePath = buildFilePath(title);
@@ -3764,14 +7629,15 @@
           answerText: noteAnswerText,
           url: location.href,
           attachmentMarker,
-          useOriginalHeadings: useOriginalQaHeadings
+          useOriginalHeadings: useOriginalQaHeadings,
+          captureMetadata
         })
-        : buildMarkdown({title, questionText: noteQuestionText, answerText: noteAnswerText, url: location.href, attachmentMarker: ""});
-      const md = generatedMarkdown.markdown
+        : buildMarkdown({title, questionText: noteQuestionText, answerText: noteAnswerText, url: location.href, attachmentMarker: "", captureMetadata});
+      const md = removeEmptyMarkdownLinkTargets(generatedMarkdown.markdown
         ? mergeDetailedMarkdownSection(baseMd, generatedMarkdown.markdown)
         : downloadedMarkdown
           ? mergeDownloadedDetailedMarkdownMarker(baseMd)
-          : baseMd;
+          : baseMd);
       const fallbackBaseMd = hasRealHtmlAttachment
         ? buildHtmlLearningMarkdown({
           title,
@@ -3779,12 +7645,13 @@
           answerText: noteAnswerText,
           url: location.href,
           attachmentMarker: "",
-          useOriginalHeadings: useOriginalQaHeadings
+          useOriginalHeadings: useOriginalQaHeadings,
+          captureMetadata
         })
         : md;
-      const fallbackMd = generatedMarkdown.markdown
+      const fallbackMd = removeEmptyMarkdownLinkTargets(generatedMarkdown.markdown
         ? mergeDetailedMarkdownSection(fallbackBaseMd, generatedMarkdown.markdown)
-        : fallbackBaseMd;
+        : fallbackBaseMd);
       const uri = buildObsidianURI({vault: settings.vaultName, file: filePath, content: fallbackMd});
       const requiresNativeSave = hasRealHtmlAttachment || hasDetailedMarkdown;
       debugLog("save mode", {
@@ -3799,8 +7666,12 @@
         usedHtmlLearningLayout: hasRealHtmlAttachment,
         candidatesCount: extraction.candidatesCount,
         failures: extraction.failures,
-        warnings: extractionWarnings
+        warnings: extractionWarnings,
+        richArtifactsExpected: richIntegrity.expectedCount,
+        richArtifactsComplete: richIntegrity.completeCount,
+        allowPartialRich
       });
+      saveAttempted = true;
       if (requiresNativeSave) {
         await saveObsidianNote({
           vaultName: settings.vaultName,
@@ -3811,14 +7682,16 @@
           downloadedAttachments,
           downloadedMarkdown,
           attachmentNames,
+          allowPartialAttachments,
           htmlSaveDir: settings.htmlSaveDir,
           fallbackUri: hasDetailedMarkdown ? "" : uri
-        }, { runtimeGuard });
+        }, { runtimeGuard, showAlert: alertFn });
       } else {
         openObsidianURI(uri);
       }
       } finally {
         state.activeSaves.delete(preSaveKey);
+        if (!saveAttempted) clearContentSaveReservation(preSaveKey);
       }
     };
 
@@ -3892,16 +7765,81 @@
       closestArtifactContainer,
       findPreviousMessageByRole,
       findPreviousQaPair,
+      resolveVisualizeSaveContext,
+      resolveRichAppContinuationContext,
       buildMarkdown,
       buildHtmlLearningMarkdown,
+      visualizeShareMetadata,
+      conversationShareMetadata,
+      buildVisualizeShareReferenceWarning,
+      buildConversationShareWarning,
+      buildVisualizeShareMarkdownDraft,
+      buildConversationShareMarkdownDraft,
+      buildVisualizeShareMarkdown,
+      buildConversationShareMarkdown,
+      buildDirectVisualizeShareMarkdown,
+      buildRichAppContinuationShareMarkdownDraft,
+      buildRichAppContinuationShareMarkdown,
+      buildDirectVisualizeShareMarkdownDraft,
+      prepareVisualizeSharePreflight,
+      captureMetadataFrontmatterLines,
+      buildFilePath,
       makeTitle,
       cleanQuestionText,
       cleanAnswerText,
       decodePercentEncodedRuns,
+      normalizeChatGptShareUrl,
+      validateStrictChatGptShareUrl,
+      extractValidatedChatGptShareUrl,
+      isVisualizeRequestNode,
+      isExplicitVisualizeRequestNode,
+      hasEarlierAssistantResponseVariant,
+      isVisualizeRequestForAssistant,
+      isVisualizeShareCandidate,
+      getVisibleShareDialogs,
+      getShareSurfaceCandidates,
+      waitForRelevantShareDialog,
+      isWholeConversationShareCopySuccessText,
+      conversationShareCopySignalEntries,
+      captureConversationShareCopySignals,
+      waitForConversationShareOutcome,
+      findCreateShareLinkButton,
+      findCopyShareLinkButton,
+      findCloseShareDialogButton,
+      captureCopySuccessState,
+      waitForCopySuccess,
+      resolveShareUrlFromCopySurface,
+      resolveShareUrlFromInstantCopy,
+      requestManualVisualizeShareUrl,
+      requestVisualizeShareConsent,
+      requestConversationShareUpdateConsent,
+      waitForValidatedShareUrl,
+      waitForUpdatedConversationShareUrl,
+      createOrReuseVisualizeShareLink,
       filenameFromArtifactText,
       filenamesFromArtifactText,
       filenameFromText,
+      collectFileLikeLinks,
+      assessArtifactIntegrity,
+      confirmPartialArtifactSave,
+      collectRichAppBlockCandidates,
+      collectRichArtifactCandidatesForStoredNote,
+      assessRichArtifactIntegrity,
+      combineCaptureIntegrity,
+      confirmIncompleteCaptureSave,
+      buildMissingRichArtifactWarning,
+      removeUnsupportedRichAppBlocks,
+      isInsideUnsupportedRichAppBlock,
+      normalizeFileCitationChips,
+      isDecorativeContentImage,
+      htmlToMarkdown,
+      removeEmptyMarkdownLinkTargets,
       elementVisibilityDetails,
+      isVisibleEnabledControl,
+      resolveResponseShareTrigger,
+      resolveConversationShareTrigger,
+      resolveVisualizeShareTriggerPlan,
+      findResponseShareButton,
       choosePreferredArtifactRow,
       resolveArtifactFileRow,
       collectArtifactFileRows,
@@ -3933,18 +7871,24 @@
       collectInteractiveArtifactDescriptors,
       hasInteractiveHtmlArtifactCandidate,
       readInteractiveHtmlArtifacts,
+      readHtmlPreviews,
       validateCapturedHtmlFiles,
       extractDownloadFiles,
       classifyExtensionRuntimeFailure,
       isExtensionRuntimeFailure,
       checkExtensionRuntimeSynchronously,
       sendExtensionMessage,
+      requestClipboardReadPermission,
       pingExtensionRuntime,
+      pingNativeHelper,
       createRuntimeGuard,
       checkRuntimeGuard,
       awaitWithRuntimeGuard,
       saveObsidianNote,
+      isDuplicateContentSave,
+      clearContentSaveReservation,
       openObsidianURIDirectly,
+      handleVisualizeShareSave,
       handleCopyClick,
       setTestLanguage(language) {
         settings.uiLanguage = normalizeLanguage(language);

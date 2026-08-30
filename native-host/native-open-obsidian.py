@@ -24,9 +24,11 @@ ATTACHMENT_SECTION_MARKERS = [
     f"\n\n## 첨부파일\n\n{ATTACHMENT_MARKER}",
 ]
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
-MAX_ATTACHMENTS = 20
+MAX_ATTACHMENTS = 100
 MAX_ATTACHMENT_CHARS = 700_000
-MAX_TOTAL_ATTACHMENT_BYTES = 5 * 1024 * 1024
+# Keep the attachment payload below Chrome's 16 MiB native-message ceiling
+# while allowing large flat study-guide batches (for example, 50 HTML files).
+MAX_TOTAL_ATTACHMENT_BYTES = 12 * 1024 * 1024
 MAX_GENERATED_MARKDOWN_CHARS = 2_000_000
 MAX_GENERATED_MARKDOWN_BYTES = 8 * 1024 * 1024
 NOTE_OPEN_DELAY_SECONDS = 1.0
@@ -445,18 +447,22 @@ def note_relative_link_path(note_parent, target):
     return rel_path.replace(os.sep, "/").replace("\\", "/")
 
 
-def save_attachment_to_target(target, vault_path, note_parent, content, source=""):
+def save_attachment_to_target(target, vault_path, note_parent, content, source="", requested_name=""):
     target = target.resolve()
     if not is_relative_to(target, vault_path):
         raise NativeHostError("resolved attachment path escapes vaultPath")
 
-    target.write_text(content, encoding="utf-8")
+    encoded = content.encode("utf-8")
+    target.write_bytes(encoded)
     relative_path_from_vault = target.relative_to(vault_path).as_posix()
     saved = {
         "name": target.name,
         "path": str(target),
         "relativePathFromVault": relative_path_from_vault,
         "linkPathFromNote": note_relative_link_path(note_parent, target),
+        "requestedName": requested_name or target.name,
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "bytes": len(encoded),
     }
     if source:
         saved["source"] = source
@@ -467,7 +473,7 @@ def save_attachment_text(attachment_dir, vault_path, note_parent, name, content,
     target = (attachment_dir / name).resolve()
     if not is_relative_to(target, vault_path):
         raise NativeHostError("resolved attachment path escapes vaultPath")
-    return save_attachment_to_target(unique_path(target), vault_path, note_parent, content, source)
+    return save_attachment_to_target(unique_path(target), vault_path, note_parent, content, source, name)
 
 
 def html_element_ids(content):
@@ -669,6 +675,11 @@ def save_attachments(message, vault_path, note_parent):
     if len(attachments) + len(downloaded_attachments) > MAX_ATTACHMENTS:
         raise NativeHostError(f"attachments must not contain more than {MAX_ATTACHMENTS} files")
 
+    attachment_names = normalize_attachment_names(message.get("attachmentNames"))
+    if len(attachment_names) > MAX_ATTACHMENTS:
+        raise NativeHostError(f"attachmentNames must not contain more than {MAX_ATTACHMENTS} files")
+    allow_partial = message.get("allowPartialAttachments") is True
+
     attachment_dir = resolve_html_save_dir(message.get("htmlSaveDir"), vault_path)
     warnings = []
     records = []
@@ -725,6 +736,28 @@ def save_attachments(message, vault_path, note_parent):
             warnings.append("identical HTML content under different filenames was excluded: " + ", ".join(names))
 
     safe_records = [record for key, record in by_name.items() if key not in rejected_names]
+    requested_names = []
+    requested_keys = set()
+    for name in attachment_names or [record["name"] for record in records]:
+        key = filename_key(name)
+        if key in requested_keys:
+            continue
+        requested_keys.add(key)
+        requested_names.append(name)
+
+    safe_record_keys = {filename_key(record["name"]) for record in safe_records}
+    missing_before_write = [name for name in requested_names if filename_key(name) not in safe_record_keys]
+    if attachment_names and missing_before_write and not allow_partial:
+        raise NativeHostError(
+            "requested attachment content is missing; note was not saved: "
+            + ", ".join(missing_before_write[:10])
+        )
+    if missing_before_write:
+        warnings.append(
+            "requested attachments without verified content were not saved: "
+            + ", ".join(missing_before_write[:10])
+        )
+
     saved = []
     attachment_manifest = {}
     reserved = set()
@@ -756,21 +789,35 @@ def save_attachments(message, vault_path, note_parent):
                 vault_path,
                 note_parent,
                 rewritten,
-                record["source"]
+                record["source"],
+                record["name"],
             ))
 
-    attachment_names = normalize_attachment_names(message.get("attachmentNames"))
-    known_names = {filename_key(item["name"]) for item in saved} | {
-        filename_key(record["name"]) for record in safe_records
+    written_requested_names = [item["requestedName"] for item in saved]
+    written_requested_keys = {filename_key(name) for name in written_requested_names}
+    missing_after_write = [name for name in requested_names if filename_key(name) not in written_requested_keys]
+    audit = {
+        "complete": not missing_after_write,
+        "allowPartial": allow_partial,
+        "requestedCount": len(requested_names),
+        "writtenCount": len(saved),
+        "requestedNames": requested_names,
+        "writtenRequestedNames": written_requested_names,
+        "writtenNames": [item["name"] for item in saved],
+        "missingNames": missing_after_write,
+        "files": [
+            {
+                "requestedName": item["requestedName"],
+                "writtenName": item["name"],
+                "sha256": item["sha256"],
+                "bytes": item["bytes"],
+            }
+            for item in saved
+        ],
+        "totalBytes": sum(item["bytes"] for item in saved),
     }
-    missing_named = [
-        name for name in dict.fromkeys(attachment_names)
-        if filename_key(name) not in known_names
-    ]
-    if missing_named:
-        warnings.append("attachmentNames without attachment content were not saved: " + ", ".join(missing_named[:5]))
 
-    return saved, warnings
+    return saved, warnings, audit
 
 
 def saved_note_open_uri(message, vault_path, note_path):
@@ -818,7 +865,7 @@ def save_note(message):
         raise NativeHostError("resolved unique note path escapes vaultPath")
 
     content = str(message.get("content") or "").replace("\r\n", "\n")
-    saved_attachments, warnings = save_attachments(message, vault_path, note_path.parent)
+    saved_attachments, warnings, attachment_audit = save_attachments(message, vault_path, note_path.parent)
     links = attachment_links(saved_attachments)
 
     content = replace_attached_html_code_blocks(
@@ -839,10 +886,14 @@ def save_note(message):
         os.fsync(handle.fileno())
     maybe_open_saved_note(message, vault_path, note_path, warnings)
 
+    note_bytes = content.encode("utf-8")
     return {
         "ok": True,
         "notePath": str(note_path),
         "attachments": saved_attachments,
+        "attachmentAudit": attachment_audit,
+        "noteSha256": hashlib.sha256(note_bytes).hexdigest(),
+        "noteBytes": len(note_bytes),
         "detailedMarkdown": detailed_markdown,
         "warnings": warnings,
     }
@@ -850,6 +901,8 @@ def save_note(message):
 
 def handle_message(message):
     action = message.get("action")
+    if action == "ping":
+        return {"ok": True, "pong": True}
     if action == "save-note":
         return save_note(message)
     if action == "open-uri":
@@ -879,6 +932,7 @@ def assert_raises(fn, expected):
 
 
 def self_test():
+    assert handle_message({"action": "ping"}) == {"ok": True, "pong": True}
     assert filename_key("전체.html") == filename_key(unicodedata.normalize("NFD", "전체.html"))
     assert_raises(lambda: validate_note_relative_path("../escape.md"), "path traversal")
     assert_raises(lambda: validate_note_relative_path("safe/../../escape.md"), "path traversal")
@@ -907,7 +961,7 @@ def self_test():
         chatgpt_dir.mkdir(parents=True)
         downloaded = base / "downloaded.html"
         downloaded.write_text("<!doctype html><html><body>ok</body></html>", encoding="utf-8")
-        saved, warnings = save_attachments({
+        saved, warnings, audit = save_attachments({
             "htmlSaveDir": "ChatGPT_Test/Attachments",
             "downloadedAttachments": [{
                 "name": "from-download.html",
@@ -917,13 +971,16 @@ def self_test():
         }, vault.resolve(), chatgpt_dir.resolve())
         assert not warnings
         assert len(saved) == 1
+        assert audit["complete"] is True
+        assert audit["requestedCount"] == audit["writtenCount"] == 1
+        assert len(audit["files"][0]["sha256"]) == 64
         assert saved[0]["relativePathFromVault"] == "ChatGPT_Test/Attachments/from-download.html"
         assert saved[0]["linkPathFromNote"] == "Attachments/from-download.html"
         assert (chatgpt_dir / "Attachments" / "from-download.html").read_text(encoding="utf-8").startswith("<!doctype html>")
 
         root_attachment = base / "root-attachment.html"
         root_attachment.write_text("<html><body>root</body></html>", encoding="utf-8")
-        saved_root, warnings_root = save_attachments({
+        saved_root, warnings_root, _audit_root = save_attachments({
             "htmlSaveDir": "Attachments",
             "attachments": [{
                 "name": "root-file.html",
@@ -934,7 +991,39 @@ def self_test():
         assert saved_root[0]["relativePathFromVault"] == "Attachments/root-file.html"
         assert saved_root[0]["linkPathFromNote"] == "../Attachments/root-file.html"
 
-        flat_saved, flat_warnings = save_attachments({
+        batch_assets = [
+            {
+                "name": f"{index:02d}-chapter.html",
+                "content": f"<!doctype html><html><head><title>{index}</title></head><body>chapter {index}</body></html>",
+            }
+            for index in range(50)
+        ]
+        batch_names = [item["name"] for item in batch_assets]
+        batch_saved, batch_warnings, batch_audit = save_attachments({
+            "htmlSaveDir": "ChatGPT_Test/FiftyAttachments",
+            "attachments": batch_assets,
+            "attachmentNames": batch_names,
+        }, vault.resolve(), chatgpt_dir.resolve())
+        assert not batch_warnings
+        assert len(batch_saved) == 50
+        assert batch_audit["complete"] is True
+        assert batch_audit["requestedCount"] == batch_audit["writtenCount"] == 50
+
+        assert_raises(lambda: save_attachments({
+            "htmlSaveDir": "ChatGPT_Test/MissingStrict",
+            "attachmentNames": ["missing.html"],
+        }, vault.resolve(), chatgpt_dir.resolve()), "note was not saved")
+        partial_saved, partial_warnings, partial_audit = save_attachments({
+            "htmlSaveDir": "ChatGPT_Test/MissingPartial",
+            "attachmentNames": ["missing.html"],
+            "allowPartialAttachments": True,
+        }, vault.resolve(), chatgpt_dir.resolve())
+        assert partial_saved == []
+        assert partial_audit["complete"] is False
+        assert partial_audit["missingNames"] == ["missing.html"]
+        assert any("without verified content" in warning for warning in partial_warnings)
+
+        flat_saved, flat_warnings, _flat_audit = save_attachments({
             "htmlSaveDir": "ChatGPT_Test/FlatAttachments",
             "attachments": [
                 {
@@ -980,7 +1069,7 @@ def self_test():
         overview_text = (flat_dir / "00-overview.html").read_text(encoding="utf-8")
         assert 'href="./index.html"' in overview_text
 
-        embedded_saved, embedded_warnings = save_attachments({
+        embedded_saved, embedded_warnings, _embedded_audit = save_attachments({
             "htmlSaveDir": "ChatGPT_Test/EmbeddedChapterAttachments",
             "attachments": [
                 {
@@ -1007,7 +1096,7 @@ def self_test():
         assert 'href="./complete.html#ch-00-title"' in embedded_index
 
         duplicate_html = "<!doctype html><html><head><title>Duplicate</title></head><body>same</body></html>"
-        duplicate_saved, duplicate_warnings = save_attachments({
+        duplicate_saved, duplicate_warnings, duplicate_audit = save_attachments({
             "htmlSaveDir": "ChatGPT_Test/DuplicateAttachments",
             "attachments": [
                 {"name": "first.html", "content": duplicate_html},
@@ -1015,9 +1104,10 @@ def self_test():
             ],
         }, vault.resolve(), chatgpt_dir.resolve())
         assert duplicate_saved == []
+        assert duplicate_audit["complete"] is False
         assert any("identical HTML content under different filenames" in warning for warning in duplicate_warnings)
 
-        conflict_saved, conflict_warnings = save_attachments({
+        conflict_saved, conflict_warnings, conflict_audit = save_attachments({
             "htmlSaveDir": "ChatGPT_Test/ConflictAttachments",
             "attachments": [
                 {"name": "same.html", "content": "<!doctype html><html><body>one</body></html>"},
@@ -1025,6 +1115,7 @@ def self_test():
             ],
         }, vault.resolve(), chatgpt_dir.resolve())
         assert conflict_saved == []
+        assert conflict_audit["complete"] is False
         assert any("conflicting attachment sources" in warning for warning in conflict_warnings)
 
         bad_download = base / "bad.txt"

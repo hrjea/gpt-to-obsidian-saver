@@ -1,6 +1,7 @@
 // background.js (service worker)
-const VERSION = "1.5.40";
+const VERSION = "1.5.47";
 const RUNTIME_PING_TYPE = "gpt2obs-runtime-ping";
+const NATIVE_PREFLIGHT_TYPE = "gpt2obs-native-preflight";
 const NATIVE_OBSIDIAN_HOST = "com.gpt_obsidian_saver.open_direct";
 const DUPLICATE_TTL_MS = 30000;
 // ChatGPT may prepare generated artifacts for tens of seconds before Chrome
@@ -304,9 +305,37 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "gpt2obs-request-clipboard-read-permission") {
+    try {
+      chrome.permissions.request({ permissions: ["clipboardRead"] }, granted => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ ok: false, error: "clipboard-read-permission-request-failed" });
+          return;
+        }
+        sendResponse({ ok: true, granted: granted === true });
+      });
+      return true;
+    } catch {
+      sendResponse({ ok: false, error: "clipboard-read-permission-request-failed" });
+      return false;
+    }
+  }
+
   if (msg && msg.type === RUNTIME_PING_TYPE) {
     sendResponse({ ok: true, pong: true, version: VERSION });
     return false;
+  }
+
+  if (msg && msg.type === NATIVE_PREFLIGHT_TYPE) {
+    chrome.runtime.sendNativeMessage(NATIVE_OBSIDIAN_HOST, { action: "ping" }, (response) => {
+      const err = chrome.runtime.lastError;
+      if (err || !response || !response.ok || response.pong !== true) {
+        sendResponse({ ok: false, error: err?.message || response?.error || "native-preflight-failed" });
+        return;
+      }
+      sendResponse({ ok: true, pong: true, native: true });
+    });
+    return true;
   }
 
   if (msg && msg.type === "begin-html-download-watch") {
@@ -392,6 +421,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       downloadedAttachments: Array.isArray(payload.downloadedAttachments) ? payload.downloadedAttachments : [],
       downloadedMarkdown: payload.downloadedMarkdown && typeof payload.downloadedMarkdown === "object" ? payload.downloadedMarkdown : null,
       attachmentNames: Array.isArray(payload.attachmentNames) ? payload.attachmentNames : [],
+      allowPartialAttachments: payload.allowPartialAttachments === true,
       htmlSaveDir: payload.htmlSaveDir || "",
       htmlCodeBlockReplacementText: payload.htmlCodeBlockReplacementText || ""
     }, (response) => {
@@ -407,6 +437,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         native: true,
         notePath: response.notePath,
         attachments: response.attachments,
+        attachmentAudit: response.attachmentAudit || null,
+        noteSha256: response.noteSha256 || "",
+        noteBytes: response.noteBytes || 0,
         detailedMarkdown: response.detailedMarkdown || null,
         warnings: response.warnings || []
       });

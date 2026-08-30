@@ -179,7 +179,7 @@ function buildScenarioNote(hooks, nodes, currentNode, hasRealHtmlAttachment, use
 
 const hooks = loadContentHooks();
 const backgroundHooks = loadBackgroundHooks();
-assert.strictEqual(hooks.VERSION, "1.5.40");
+assert.strictEqual(hooks.VERSION, "1.5.47");
 assert.strictEqual(
   backgroundHooks.DOWNLOAD_WATCH_TIMEOUT_MS,
   90000,

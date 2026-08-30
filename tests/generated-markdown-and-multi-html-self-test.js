@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-function loadHooks() {
+function loadHooks({ syncState = {} } = {}) {
   const noop = () => {};
   const fakeElement = {
     querySelectorAll: () => [],
@@ -36,7 +36,7 @@ function loadHooks() {
     },
     chrome: {
       storage: {
-        sync: { get: (_keys, callback) => callback({}) },
+        sync: { get: (_keys, callback) => callback({ ...syncState }) },
         local: { get: (_keys, callback) => callback({}) },
         onChanged: { addListener: noop }
       },
@@ -45,7 +45,7 @@ function loadHooks() {
         lastError: null,
         sendMessage: (message, callback) => callback?.(
           message?.type === "gpt2obs-runtime-ping"
-            ? { ok: true, pong: true, version: "1.5.40" }
+            ? { ok: true, pong: true, version: "1.5.47" }
             : { ok: true }
         )
       }
@@ -66,8 +66,79 @@ function loadHooks() {
   return hooks;
 }
 
+function loadBackgroundMessageHarness() {
+  let messageListener = null;
+  const nativeMessages = [];
+  const noop = () => {};
+  const runtime = {
+    lastError: null,
+    onInstalled: { addListener: noop },
+    onMessage: { addListener(listener) { messageListener = listener; } },
+    sendNativeMessage(host, message, callback) {
+      nativeMessages.push({ host, message });
+      callback({ ok: true, pong: true });
+    }
+  };
+  const event = { addListener: noop, removeListener: noop };
+  const sandbox = {
+    console,
+    URL,
+    Date,
+    Math,
+    setTimeout,
+    clearTimeout,
+    chrome: {
+      runtime,
+      storage: { sync: { get: (_keys, callback) => callback({}), set: noop } },
+      downloads: { onCreated: event, onChanged: event, search: (_query, callback) => callback([]) }
+    },
+    __GPT_OBSIDIAN_ENABLE_TEST_HOOKS__: false
+  };
+  sandbox.globalThis = sandbox;
+  const sourcePath = path.join(__dirname, "..", "background.js");
+  vm.runInNewContext(fs.readFileSync(sourcePath, "utf8"), sandbox, { filename: sourcePath });
+  assert.strictEqual(typeof messageListener, "function", "background message listener must be registered");
+  return { messageListener, nativeMessages, runtime };
+}
+
 function count(text, pattern) {
   return (String(text).match(pattern) || []).length;
+}
+
+function textNode(value) {
+  return { nodeType: 3, nodeValue: String(value) };
+}
+
+function elementNode(tagName, { attrs = {}, children = [], closest = () => null } = {}) {
+  return {
+    nodeType: 1,
+    tagName: String(tagName).toUpperCase(),
+    childNodes: children,
+    style: {},
+    getAttribute: name => attrs[name] || "",
+    closest
+  };
+}
+
+function renderMarkdownTree(hooks, children) {
+  const sandbox = hooks.__sandbox;
+  const originalCreateElement = sandbox.document.createElement;
+  sandbox.document.createElement = tagName => {
+    if (String(tagName).toLowerCase() !== "div") return originalCreateElement(tagName);
+    return {
+      nodeType: 1,
+      tagName: "DIV",
+      childNodes: children,
+      style: {},
+      set innerHTML(_value) {},
+      get innerHTML() { return ""; }
+    };
+  };
+  try {
+    return hooks.htmlToMarkdown("fixture");
+  } finally {
+    sandbox.document.createElement = originalCreateElement;
+  }
 }
 
 function htmlDocument(name, heading, body, links = "") {
@@ -184,9 +255,447 @@ function makeFlyoutRegion({
   return region;
 }
 
+let handleFixtureSequence = 0;
+
+function makeHandleCopyFixture(hooks, { rich = true, html = false, outer = "outer explanation" } = {}) {
+  const sandbox = hooks.__sandbox;
+  const original = {
+    sendMessage: sandbox.chrome.runtime.sendMessage,
+    confirm: sandbox.confirm,
+    selection: sandbox.window.getSelection,
+    href: sandbox.location.href
+  };
+  const events = { confirms: 0, opens: [], saves: [] };
+  let approve = false;
+  const richSelector = '[data-app-block-preview="true"]';
+  const actualHtml = htmlDocument("Actual", "Real file", "complete body");
+  const appBlock = { remove() {}, closest: selector => selector === richSelector ? appBlock : null };
+  const appFrame = {
+    src: "https://app-block-test.web-sandbox.oaiusercontent.com/",
+    parentElement: null,
+    getAttribute: () => "",
+    closest: selector => selector === richSelector ? appBlock : null,
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+  const realFrame = {
+    src: "",
+    parentElement: null,
+    getAttribute: name => name === "srcdoc" ? actualHtml : "",
+    closest: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+  const htmlRoot = {
+    parentElement: null,
+    innerText: "actual.html",
+    textContent: "actual.html",
+    getAttribute: () => "",
+    querySelector: selector => selector.includes("iframe") ? realFrame : null,
+    querySelectorAll: () => []
+  };
+  const answerText = outer;
+  const makeClone = () => {
+    const clonedBlock = { remove() {}, closest: selector => selector === richSelector ? clonedBlock : null };
+    return {
+      matches: () => false,
+      querySelector: () => null,
+      querySelectorAll: selector => selector === richSelector && rich ? [clonedBlock] : [],
+      cloneNode: makeClone,
+      getAttribute: () => "",
+      innerHTML: "",
+      innerText: answerText,
+      textContent: answerText,
+      contains: () => false
+    };
+  };
+  const container = {
+    parentElement: null,
+    matches: () => false,
+    getAttribute: name => name === "data-message-author-role" ? "assistant" : "",
+    innerHTML: "",
+    innerText: answerText,
+    textContent: answerText,
+    contains: node => node === container,
+    cloneNode: makeClone,
+    querySelector(selector) {
+      return html && selector.includes("iframe") ? realFrame : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === richSelector) return rich ? [appBlock] : [];
+      if (selector === "iframe") return html ? (rich ? [appFrame, realFrame] : [realFrame]) : (rich ? [appFrame] : []);
+      return [];
+    }
+  };
+  appFrame.parentElement = container;
+  htmlRoot.parentElement = container;
+  realFrame.parentElement = htmlRoot;
+  const button = {
+    closest: selector => (
+      selector === "[data-message-author-role]" ||
+      selector === "[data-testid^='conversation-turn-']"
+    ) ? container : null
+  };
+
+  sandbox.location.href = `https://chatgpt.example/c/handle-rich-${++handleFixtureSequence}`;
+  sandbox.window.getSelection = () => "Visualize this";
+  sandbox.confirm = () => {
+    events.confirms += 1;
+    return approve;
+  };
+  sandbox.chrome.runtime.sendMessage = (message, callback) => {
+    if (message?.type === "gpt2obs-runtime-ping") {
+      callback?.({ ok: true, pong: true, version: hooks.VERSION });
+      return;
+    }
+    if (message?.type === "open-obsidian-uri") {
+      events.opens.push(message);
+      callback?.({ ok: true });
+      return;
+    }
+    if (message?.type === "save-obsidian-note") {
+      events.saves.push(message);
+      const names = message.payload?.attachmentNames || [];
+      callback?.({
+        ok: true,
+        attachments: names.map(name => ({ name, requestedName: name })),
+        attachmentAudit: { writtenRequestedNames: names, missingNames: [] },
+        warnings: []
+      });
+      return;
+    }
+    callback?.({ ok: true });
+  };
+
+  return {
+    events,
+    setApprove(value) { approve = value; },
+    run() { return hooks.handleCopyClick(button, { delayMs: 0 }); },
+    restore() {
+      sandbox.chrome.runtime.sendMessage = original.sendMessage;
+      sandbox.confirm = original.confirm;
+      sandbox.window.getSelection = original.selection;
+      sandbox.location.href = original.href;
+    }
+  };
+}
+
 async function main() {
   const hooks = loadHooks();
-  assert.strictEqual(hooks.VERSION, "1.5.40");
+  assert.strictEqual(hooks.VERSION, "1.5.47");
+
+  const missingFolderHooks = loadHooks({ syncState: { prefixDate: false } });
+  const rootFolderHooks = loadHooks({ syncState: { folderPath: "", prefixDate: false } });
+  const explicitFolderHooks = loadHooks({ syncState: { folderPath: "Notes/ChatGPT", prefixDate: false } });
+  assert.strictEqual(typeof rootFolderHooks.buildFilePath, "function", "content test hooks must expose the final note-path builder");
+  assert.strictEqual(missingFolderHooks.buildFilePath("Folder contract"), "ChatGPT/Folder contract.md", "a missing folderPath key keeps the first-install ChatGPT default");
+  assert.strictEqual(rootFolderHooks.buildFilePath("Folder contract"), "Folder contract.md", "an explicitly stored empty folderPath must target the Vault root");
+  assert.strictEqual(explicitFolderHooks.buildFilePath("Folder contract"), "Notes/ChatGPT/Folder contract.md");
+
+  const fileLink = (name, href = "") => ({
+    innerText: name,
+    textContent: name,
+    getAttribute: attribute => attribute === "href" ? href : ""
+  });
+  const unresolvedContainer = {
+    querySelectorAll: selector => selector === "a, [role='link']"
+      ? [fileLink("HTML 목록 index.html"), fileLink("00-overview.html"), fileLink("study-package.zip")]
+      : []
+  };
+  const fileLinks = hooks.collectFileLikeLinks(unresolvedContainer);
+  assert.strictEqual(fileLinks.length, 3);
+  assert.strictEqual(fileLinks[0].name, "index.html", "a descriptive link label must resolve to the actual trailing filename token");
+  assert(fileLinks.every(item => item.unresolved), "file-like anchors without href must be classified as unresolved");
+  const ordinaryExternalFileLinks = hooks.collectFileLikeLinks({
+    querySelectorAll: selector => selector === "a, [role='link']"
+      ? [fileLink("schema.json", "https://example.com/schema.json"), fileLink("manual.html", "https://example.com/manual.html")]
+      : []
+  });
+  assert.strictEqual(
+    ordinaryExternalFileLinks.length,
+    0,
+    "ordinary external links whose labels look like filenames must not become expected deliverables"
+  );
+  const incompleteIntegrity = hooks.assessArtifactIntegrity({
+    fileLinks,
+    attachments: [
+      { name: "index.html", content: htmlDocument("Index", "Index", "captured") },
+      { name: "00-overview.html", content: htmlDocument("Overview", "Overview", "captured") }
+    ]
+  });
+  assert.strictEqual(incompleteIntegrity.complete, false);
+  assert.deepStrictEqual(Array.from(incompleteIntegrity.missingNames), ["study-package.zip"]);
+  let partialPrompt = "";
+  assert.strictEqual(hooks.confirmPartialArtifactSave(incompleteIntegrity, message => {
+    partialPrompt = String(message);
+    return false;
+  }), false, "Cancel must stop an incomplete artifact save by default");
+  assert(partialPrompt.includes("study-package.zip"));
+  assert.strictEqual(
+    hooks.confirmPartialArtifactSave(incompleteIntegrity, () => true),
+    true,
+    "an explicit OK may authorize body-only or partial saving"
+  );
+  assert.strictEqual(
+    hooks.removeEmptyMarkdownLinkTargets("[00-overview.html]() and [valid](https://example.com)"),
+    "00-overview.html and [valid](https://example.com)",
+    "empty Markdown targets must be preserved only as plain labels"
+  );
+  assert.strictEqual(
+    hooks.removeEmptyMarkdownLinkTargets([
+      "outside [missing.html]()",
+      "",
+      "```md",
+      "[literal-inside-fence.html]()",
+      "```not-a-closing-fence",
+      "[still-literal-inside-fence.html]()",
+      "```",
+      "inline `[literal-inline.html]()`"
+    ].join("\n")),
+    [
+      "outside missing.html",
+      "",
+      "```md",
+      "[literal-inside-fence.html]()",
+      "```not-a-closing-fence",
+      "[still-literal-inside-fence.html]()",
+      "```",
+      "inline `[literal-inline.html]()`"
+    ].join("\n"),
+    "empty-link cleanup must not rewrite literal Markdown examples inside fenced or inline code"
+  );
+
+  assert.strictEqual(
+    renderMarkdownTree(hooks, [elementNode("a", { children: [textNode("00-overview.html")] })]),
+    "00-overview.html",
+    "an href-less file anchor must convert directly to plain text"
+  );
+  assert.strictEqual(
+    renderMarkdownTree(hooks, [elementNode("a", {
+      attrs: { href: "https://example.com/reference" },
+      children: [textNode("normal reference")]
+    })]),
+    "[normal reference](https://example.com/reference)",
+    "an ordinary external link must remain a Markdown link"
+  );
+  assert.strictEqual(
+    renderMarkdownTree(hooks, [textNode("본문의 피드백 보내기 문구는 실제 내용입니다.")]),
+    "본문의 피드백 보내기 문구는 실제 내용입니다.",
+    "ordinary answer text containing feedback wording must be preserved"
+  );
+
+  const richBlockA = { id: "block-a" };
+  const richBlockB = { id: "block-b" };
+  const oneRichRoot = {
+    matches: () => false,
+    querySelectorAll: selector => selector === '[data-app-block-preview="true"]' ? [richBlockA] : []
+  };
+  const twoRichRoot = {
+    matches: () => false,
+    querySelectorAll: selector => selector === '[data-app-block-preview="true"]' ? [richBlockA, richBlockB] : []
+  };
+  const generalIframeRoot = {
+    matches: () => false,
+    querySelectorAll: selector => selector === "iframe" ? [{ src: "https://web-sandbox.oaiusercontent.com.evil.example/app" }] : []
+  };
+  const expectedRichOne = hooks.collectRichAppBlockCandidates(oneRichRoot);
+  assert.strictEqual(expectedRichOne.length, 1, "one app container and any nested iframe count as one rich artifact");
+  assert.strictEqual(hooks.collectRichAppBlockCandidates(twoRichRoot).length, 2);
+  assert.strictEqual(
+    hooks.collectRichAppBlockCandidates(generalIframeRoot).length,
+    0,
+    "an ordinary iframe or lookalike sandbox hostname must not be treated as a rich app block"
+  );
+
+  const richIncomplete = hooks.assessRichArtifactIntegrity({ expected: expectedRichOne, captures: [] });
+  const richComplete = hooks.assessRichArtifactIntegrity({
+    expected: expectedRichOne,
+    captures: [{ expectedId: expectedRichOne[0].id, representation: "static-markdown-complete" }]
+  });
+  const richPartial = hooks.assessRichArtifactIntegrity({
+    expected: expectedRichOne,
+    captures: [{ expectedId: expectedRichOne[0].id, representation: "static-markdown-partial" }]
+  });
+  const fileComplete = hooks.assessArtifactIntegrity();
+  assert.strictEqual(richIncomplete.complete, false);
+  assert.strictEqual(richPartial.complete, false, "a partial static representation must not satisfy rich completeness");
+  assert.strictEqual(richComplete.complete, true);
+  assert.strictEqual(hooks.combineCaptureIntegrity(fileComplete, richIncomplete).complete, false);
+  assert.strictEqual(hooks.combineCaptureIntegrity(incompleteIntegrity, richComplete).complete, false);
+  assert.strictEqual(hooks.combineCaptureIntegrity(fileComplete, richComplete).complete, true);
+
+  let richPrompt = "";
+  const richOverall = hooks.combineCaptureIntegrity(fileComplete, richIncomplete);
+  assert.strictEqual(hooks.confirmIncompleteCaptureSave(richOverall, message => {
+    richPrompt = String(message);
+    return false;
+  }), false, "rich-app loss must cancel by default");
+  assert(richPrompt.includes("1") && /app block/i.test(richPrompt));
+  assert.strictEqual(hooks.confirmIncompleteCaptureSave(richOverall, () => true), true);
+
+  hooks.setTestLanguage("ko");
+  const partialWarning = hooks.buildMissingRichArtifactWarning(richIncomplete);
+  const partialNote = hooks.buildMarkdown({
+    title: "부분 저장 테스트",
+    questionText: "질문",
+    answerText: `${partialWarning}\n\n바깥 설명문`,
+    url: "https://chatgpt.example/c/rich-test",
+    captureMetadata: {
+      captureStatus: "partial",
+      richArtifactsExpected: 1,
+      richArtifactsComplete: 0
+    }
+  });
+  assert(partialNote.includes("capture_status: partial"));
+  assert(partialNote.includes("rich_artifacts_expected: 1"));
+  assert(partialNote.includes("rich_artifacts_complete: 0"));
+  assert(partialNote.includes("interactive_behavior_preserved: false"));
+  assert(partialNote.includes("> [!warning] 상호작용형 앱 블록 미저장"));
+  ["피드백 보내기", "Obsidian 저장", "web-sandbox.oaiusercontent.com", "/images/visualize/app-blocks-visualize.svg", "]()"]
+    .forEach(forbidden => assert(!partialNote.includes(forbidden), `partial note must not contain ${forbidden}`));
+
+  let removedRichBlocks = 0;
+  const removableRichBlock = { remove: () => { removedRichBlocks += 1; } };
+  assert.strictEqual(hooks.removeUnsupportedRichAppBlocks({
+    matches: () => false,
+    querySelectorAll: selector => selector === '[data-app-block-preview="true"]' ? [removableRichBlock] : []
+  }), 1);
+  assert.strictEqual(removedRichBlocks, 1, "the cloned app block shell must be removed exactly once");
+
+  let citationReplacement = null;
+  const truncatedCitation = {
+    innerText: "screencapture-x-Aqui-mi-casa-st…",
+    textContent: "screencapture-x-Aqui-mi-casa-st…",
+    replaceWith: node => { citationReplacement = node; }
+  };
+  hooks.normalizeFileCitationChips({
+    matches: () => false,
+    querySelectorAll: selector => selector === "[data-file-citation-primary-source]" ? [truncatedCitation] : []
+  });
+  assert.strictEqual(citationReplacement.textContent, "출처 파일 표시명: screencapture-x-Aqui-mi-casa-st…");
+  assert(!citationReplacement.textContent.includes("]("), "a citation display chip must not become a link");
+
+  const pluginIcon = elementNode("img", {
+    attrs: { src: "https://chatgpt.com/images/visualize/app-blocks-visualize.svg" },
+    closest: selector => selector.includes("data-plugin-id") ? { id: "visualize-mention" } : null
+  });
+  const ordinarySameUrlImage = elementNode("img", {
+    attrs: { src: "https://chatgpt.com/images/visualize/app-blocks-visualize.svg", alt: "diagram" }
+  });
+  const ordinaryRemoteImage = elementNode("img", {
+    attrs: { src: "https://example.com/diagram.svg", alt: "diagram" }
+  });
+  assert.strictEqual(hooks.isDecorativeContentImage(pluginIcon), true);
+  assert.strictEqual(hooks.isDecorativeContentImage(ordinarySameUrlImage), false, "path alone is not enough to remove an image");
+  assert.strictEqual(hooks.isDecorativeContentImage(ordinaryRemoteImage), false);
+  assert.strictEqual(
+    renderMarkdownTree(hooks, [ordinaryRemoteImage]),
+    "![diagram](https://example.com/diagram.svg)",
+    "ordinary content images must survive Markdown conversion"
+  );
+
+  const appFrame = {
+    src: "https://web-sandbox.oaiusercontent.com/visualize",
+    getAttribute: name => name === "srcdoc" ? htmlDocument("Wrong", "Feedback", "피드백 보내기") : "",
+    closest: selector => selector === '[data-app-block-preview="true"]' ? richBlockA : null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    parentElement: null
+  };
+  const realHtml = htmlDocument("Actual", "Real file", "complete body");
+  const realFrame = {
+    src: "",
+    getAttribute: name => name === "srcdoc" ? realHtml : "",
+    closest: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    parentElement: null
+  };
+  const mixedFrameContainer = {
+    innerText: "actual.html",
+    textContent: "actual.html",
+    getAttribute: () => "",
+    querySelector: selector => selector.includes("iframe") ? realFrame : null,
+    querySelectorAll: selector => selector === "iframe" ? [appFrame, realFrame] : []
+  };
+  appFrame.parentElement = mixedFrameContainer;
+  realFrame.parentElement = mixedFrameContainer;
+  const previewFiles = await hooks.readHtmlPreviews(mixedFrameContainer, ["actual.html"], []);
+  assert.strictEqual(previewFiles.length, 1, "an app iframe must not consume the fallback filename of a real HTML preview");
+  assert.strictEqual(previewFiles[0].name, "actual.html");
+  assert.strictEqual(previewFiles[0].content, realHtml);
+
+  const reservationKey = `cancel-retry-${Date.now()}`;
+  assert.strictEqual(hooks.isDuplicateContentSave(reservationKey), false);
+  assert.strictEqual(hooks.isDuplicateContentSave(reservationKey), true);
+  hooks.clearContentSaveReservation(reservationKey);
+  assert.strictEqual(hooks.isDuplicateContentSave(reservationKey), false, "cancelling must allow an immediate retry");
+  hooks.clearContentSaveReservation(reservationKey);
+  hooks.setTestLanguage("en");
+
+  {
+    const fixture = makeHandleCopyFixture(hooks);
+    try {
+      await fixture.run();
+      assert.strictEqual(fixture.events.confirms, 1);
+      assert.strictEqual(fixture.events.opens.length, 0, "Cancel must not issue an Obsidian URI request");
+      assert.strictEqual(fixture.events.saves.length, 0, "Cancel must not issue a Native save request");
+
+      fixture.setApprove(true);
+      await fixture.run();
+      assert.strictEqual(fixture.events.confirms, 2, "the same response must be immediately retryable after cancellation");
+      assert.strictEqual(fixture.events.opens.length, 1);
+      assert.strictEqual(fixture.events.saves.length, 0);
+      const markdown = new URL(fixture.events.opens[0].uri).searchParams.get("content");
+      assert(markdown.includes("capture_status: partial"));
+      assert(markdown.includes("rich_artifacts_expected: 1"));
+      assert(markdown.includes("rich_artifacts_complete: 0"));
+      assert(markdown.includes("> [!warning]"));
+      assert(!markdown.includes("visualize_share_url:"), "an explicitly approved generic partial note must not invent a share URL");
+      assert(!markdown.includes("capture_mode:"), "an explicitly approved generic partial note must not claim a remote-share mode");
+      ["web-sandbox.oaiusercontent.com", "피드백 보내기", "]()"]
+        .forEach(forbidden => assert(!markdown.includes(forbidden), `orchestrated partial note must not contain ${forbidden}`));
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false });
+    try {
+      await fixture.run();
+      assert.strictEqual(fixture.events.confirms, 0, "an ordinary response must not show a rich-app warning");
+      assert.strictEqual(fixture.events.opens.length, 1);
+      assert.strictEqual(fixture.events.saves.length, 0);
+      const markdown = new URL(fixture.events.opens[0].uri).searchParams.get("content");
+      assert(!markdown.includes("capture_status: partial"));
+      assert(!markdown.includes("> [!warning]"));
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  {
+    const fixture = makeHandleCopyFixture(hooks, { rich: true, html: true });
+    fixture.setApprove(true);
+    try {
+      await fixture.run();
+      assert.strictEqual(fixture.events.confirms, 1);
+      assert.strictEqual(fixture.events.opens.length, 0);
+      assert.strictEqual(fixture.events.saves.length, 1);
+      const payload = fixture.events.saves[0].payload;
+      assert.deepStrictEqual(Array.from(payload.attachmentNames), ["actual.html"]);
+      assert.strictEqual(
+        payload.allowPartialAttachments,
+        false,
+        "rich-only consent must not weaken strict Native verification for a complete HTML file"
+      );
+      assert(payload.content.includes("capture_status: partial"));
+      assert(payload.content.includes("> [!warning]"));
+    } finally {
+      fixture.restore();
+    }
+  }
 
   const sandbox = hooks.__sandbox;
   const originalRuntimeId = sandbox.chrome.runtime.id;
@@ -816,6 +1325,33 @@ async function main() {
   assert(nativeFailureAlerts[0].includes("열도록 시도했지만"));
   assert(!nativeFailureAlerts[0].includes("다시 열었지만"), "unverified URI fallback must never be described as a successful open");
 
+  const auditAlerts = [];
+  const incompleteAuditResult = await hooks.saveObsidianNote({
+    vaultName: "Test",
+    vaultPath: "/tmp/Test",
+    filePath: "ChatGPT/incomplete-audit.md",
+    content: "# incomplete audit",
+    attachments: [{ name: "required.html", content: "<!doctype html><html><body>required</body></html>" }],
+    downloadedAttachments: [],
+    downloadedMarkdown: null,
+    attachmentNames: ["required.html"],
+    allowPartialAttachments: false,
+    htmlSaveDir: "ChatGPT/Attachments",
+    fallbackUri: ""
+  }, {
+    runtimeGuard: healthyRuntimeGuard,
+    sendMessage: async () => ({
+      ok: true,
+      attachments: [],
+      attachmentAudit: { writtenRequestedNames: [], missingNames: ["required.html"] },
+      warnings: []
+    }),
+    showAlert: message => { auditAlerts.push(String(message)); }
+  });
+  assert.strictEqual(incompleteAuditResult.ok, false);
+  assert.strictEqual(incompleteAuditResult.error, "native-attachment-audit-incomplete");
+  assert(auditAlerts.some(message => message.includes("required.html")));
+
   let disconnectedUriAttempts = 0;
   let disconnectedNotices = 0;
   let disconnectedNativeMessages = 0;
@@ -1012,6 +1548,20 @@ async function main() {
     /msg\.type === RUNTIME_PING_TYPE[\s\S]{0,200}pong:\s*true/.test(backgroundSource),
     "the background service worker must expose a side-effect-free runtime ping response"
   );
+
+  const backgroundHarness = loadBackgroundMessageHarness();
+  let nativePreflightResponse = null;
+  const nativePreflightAsync = backgroundHarness.messageListener(
+    { type: "gpt2obs-native-preflight" },
+    {},
+    response => { nativePreflightResponse = response; }
+  );
+  assert.strictEqual(nativePreflightAsync, true, "Native preflight must keep the response channel open");
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(backgroundHarness.nativeMessages)),
+    [{ host: "com.gpt_obsidian_saver.open_direct", message: { action: "ping" } }]
+  );
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(nativePreflightResponse)), { ok: true, pong: true, native: true });
 
   console.log("generated Markdown and multi-HTML artifact self-test ok");
 }
