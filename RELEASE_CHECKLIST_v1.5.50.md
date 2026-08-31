@@ -11,21 +11,21 @@ Status values: `PASS`, `AUTOMATED PASS`, `MANUAL PASS`, `FAIL`, `NOT RUN`, `NOT 
 | Version | PASS | Static `manifest.json`, content/background/options constants, and the options-page diagnostic source all report `1.5.50`; the rendered packaged diagnostic is checked separately at the fresh-load gate. |
 | Public export commit | NOT RUN | Record the reviewed Public-only commit after server-side path-boundary verification. |
 | Stable tag | NOT RUN | `v1.5.50` must be an annotated tag that peels to the Public export commit. |
-| Release date | PASS | 2026-08-31 (Asia/Seoul). |
+| Release date | NOT RUN | Record the actual Asia/Seoul release date only after the Public `main`, stable tag, and GitHub Release publication succeeds. |
 
 ## Automatic verification
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Full release validation | AUTOMATED PASS | Fresh `bash scripts/validate-release.sh` on the pre-commit Public candidate passed all available checks. Run it again on each clean committed candidate. |
-| Patch whitespace/errors | AUTOMATED PASS | Fresh `git diff --check` passed on the pre-commit Public candidate. Run it again on each clean committed candidate. |
+| Full release validation | AUTOMATED PASS | Fresh `/bin/bash scripts/validate-release.sh` passed on clean code commit `bb84b61`, including the release-boundary fixes; it is rerun after this checklist-only commit before tagging. |
+| Patch whitespace/errors | AUTOMATED PASS | `git diff --check` passed on clean code commit `bb84b61`; it is rerun after this checklist-only commit before tagging. |
 | JavaScript regression suites | AUTOMATED PASS | Content behavior, generated artifacts, options storage, background clipboard permission, and Visualize share-reference self-tests passed through the validation script. |
 | Native helper | AUTOMATED PASS | Python compile and Native self-test passed. |
 | macOS installer scripts | AUTOMATED PASS | Installer and uninstaller shell syntax passed. |
 | Windows PowerShell syntax | SKIPPED | `pwsh` is unavailable on the release machine. |
-| Privacy/artifact scan | AUTOMATED PASS | Exact Public inventory, private user-path, private conversation/share URL, Chrome extension-ID, cache, log, generated-artifact, and archive-boundary scans passed with redacted diagnostics. |
+| Privacy/artifact scan | AUTOMATED PASS | Exact Public inventory, private user-path, private conversation/share URL, Chrome extension-ID, cache, log, generated-artifact, and archive-boundary scans passed with redacted diagnostics. URL-token exemption is limited to `tests/` entries whose token starts with `synthetic-`; ellipsis, bare UUID, ordinary-test, and non-test synthetic tokens are rejected. |
 | Runtime code review | PASS | Final runtime review found 0 Critical and 0 Important issues after the consent-remount, ID-less marker, Korean exclusion, privacy scanner, and contract fixes. |
-| Public export review | NOT RUN | Re-run after the Public-only documentation and release-tooling adaptations are final. |
+| Public export review | NOT RUN | Whole-diff and focused release-tooling reviews cleared the code and scripts, but the final checklist review remains open; record `PASS` only after its blockers are closed. |
 
 ## Live and manual evidence
 
@@ -48,12 +48,12 @@ Status values: `PASS`, `AUTOMATED PASS`, `MANUAL PASS`, `FAIL`, `NOT RUN`, `NOT 
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Clean committed Public candidate | NOT RUN | Must be a descendant of the preflighted Public `main`, with no unrelated history merge. |
-| Public-only validation | NOT RUN | Run the Public validation, allowlist/denylist scan, link scan, and `git diff --check`. |
-| Four ZIP archives plus checksums | NOT RUN | Generate only from the clean committed Public checkout. |
-| Archive contents | NOT RUN | Extension manifest at ZIP root; Native ZIPs platform-bounded; source ZIP matches the Public allowlist. |
-| Local SHA-256 verification | NOT RUN | Run from `dist/` against `SHA256SUMS.txt`. |
-| Fresh unpacked-package load | NOT RUN | Extract the release ZIP in a fresh temporary Chrome profile and verify manifest/runtime version 1.5.50. |
+| Clean committed Public candidate | PASS | Reviewed code/package input commit `bb84b61` is a direct descendant of the preflighted Public `main` with no merge. The only following source change is this evidence checklist, which is revalidated from a clean commit before final packaging. |
+| Public-only validation | AUTOMATED PASS | Full validation, exact 53-path allowlist, Markdown links, privacy scan, and `git diff --check` passed under macOS Bash 3.2 on clean `bb84b61`; the same commands are rerun after this checklist commit. |
+| Four ZIP archives plus checksums | AUTOMATED PASS | `scripts/package-release.sh` generated exactly four ZIPs plus `SHA256SUMS.txt` from clean `bb84b61`; all files are regenerated from the final checklist commit before upload. |
+| Archive contents | AUTOMATED PASS | Extension ZIP contained the exact ten allowlisted files with bytes matching committed inputs; Native ZIPs were platform-bounded; source ZIP matched all 53 committed paths and the required path-list hash. |
+| Local SHA-256 verification | AUTOMATED PASS | All four clean-commit ZIPs passed `shasum -a 256 -c SHA256SUMS.txt`; the final checksum file is regenerated and reverified after this checklist commit. |
+| Fresh unpacked-package load | MANUAL PASS | A new isolated Chrome for Testing profile loaded the clean-commit extension ZIP (SHA-256 `38cd5ddaad3cea95497ab8313691a0301881b242e124c65bd5f9133dbd598168`) as enabled version 1.5.50. Options showed Build/content-script 1.5.50, runtime ping returned `{ok:true,pong:true,version:"1.5.50"}`, the console had 0 errors and 0 warnings, and the package source used the explicit `<share-token>` placeholder. No user Chrome profile, Native registration, or Vault state was touched. |
 | Public `main` push | NOT RUN | Re-read the server ref immediately before a normal non-force fast-forward push. |
 | GitHub Release | NOT RUN | Publish non-draft, non-prerelease v1.5.50 with exactly five assets and mark it latest. |
 | Public asset re-download | NOT RUN | Re-download all assets into a fresh directory and verify the four ZIPs against the published checksum file. |
