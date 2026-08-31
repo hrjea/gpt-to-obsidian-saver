@@ -32,7 +32,7 @@
 
 - Add an optional, user-triggered `clipboardRead` permission path for Visualize share saves without expanding the extension's required permissions.
 - Support existing and newly created ChatGPT share links whose URL is not exposed in the DOM by clicking one unambiguous response-scoped `Copy link`, requiring a fresh copy-success UI signal, and reading the clipboard at most once.
-- Validate clipboard and manual input as a single absolute `https://chatgpt.com/s/...` or `/share/...` URL, rejecting credentials, ports, queries, fragments, conversation links, external hosts, Markdown, and additional text.
+- Validate clipboard and manual input as a single absolute `https://chatgpt.com/s/<share-token>` or `/share/<share-token>` URL, rejecting credentials, ports, queries, fragments, conversation links, external hosts, Markdown, and additional text.
 - Fall back to an extension-owned empty manual input after permission denial, copy-signal failure, clipboard exceptions, or invalid clipboard content; never log or persist the raw clipboard/manual value.
 - Preserve Native-only saving, current-A2 toolbar scoping, Q1/A1 and rich/file preflight checks, existing-link no-mutation behavior, created-link failure warnings, and observer/timer cleanup.
 - Add permission, existing/new link, stale clipboard, manual fallback, ambiguity, privacy, replacement-surface, and failure-state regressions.

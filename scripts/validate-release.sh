@@ -141,27 +141,8 @@ else
   printf '%s\n' "$inventory_diff" | sed 's/^/  /'
 fi
 
-private_paths=(
-  AGENTS.md requirements.md docs/project-memory.md docs/project-history.md
-  docs/verification-checklist.md docs/adr docs/debugging docs/interfaces docs/superpowers
-  docs/codex-for-oss-application-notes.md smoke-test-artifacts screenshots-private
-)
-private_path_found=0
-for path in "${private_paths[@]}"; do
-  if [ -e "$path" ]; then
-    printf '  private canonical path present: %s\n' "$path"
-    private_path_found=1
-  fi
-done
-if [ "$private_path_found" -eq 0 ]; then pass "no private canonical files"; else fail "no private canonical files"; fi
-
-private_ref_found=0
-while IFS= read -r line; do
-  printf '  %s\n' "$line"
-  private_ref_found=1
-done < <(grep -R -n -E '(^|[^A-Za-z0-9_])(AGENTS\.md|requirements\.md|docs/(project-memory|project-history|verification-checklist|adr/|debugging/|interfaces/|superpowers/)|codex-for-oss-application-notes\.md)' . \
-  --exclude-dir=.git --exclude-dir=dist --exclude='validate-release.sh' --exclude='*.png' --exclude='*.gif' || true)
-if [ "$private_ref_found" -eq 0 ]; then pass "no private canonical references"; else fail "no private canonical references"; fi
+# The exact inventory above is the in-tree package boundary. Export-only names are
+# reviewed outside this public tree so the validator cannot disclose or exempt them.
 
 if python3 - <<'PY' >/tmp/gpt_obsidian_markdown_links.out 2>&1
 from pathlib import Path
@@ -228,10 +209,6 @@ import re
 excluded_dirs = {".git", ".worktrees", "dist", "smoke-test-artifacts"}
 excluded_suffixes = {".png", ".gif"}
 placeholder_users = {"example", "me", "test", "user", "username", "you"}
-known_synthetic_ids = {
-    "00000000-0000-4000-8000-000000000000",
-    "123e4567-e89b-12d3-a456-426614174000",
-}
 conversation_url_pattern = re.compile(r"https://(?:chatgpt|chat\.openai)\.com/c/(?P<token>[^/?#\s\"'<>`]+)")
 share_url_pattern = re.compile(r"https://chatgpt\.com/(?:s|share)/(?P<token>[^/?#\s\"'<>`]+)")
 mac_user_path_pattern = re.compile(r"(?<![A-Za-z0-9])/(?:Users|home)/(?P<user>[A-Za-z0-9._-]+)")
@@ -239,15 +216,11 @@ windows_user_path_pattern = re.compile(r"(?i)(?:[A-Z]:)?\\+(?:Users)\\+(?P<user>
 chrome_extension_id_pattern = re.compile(r"(?<![a-p])[a-p]{32}(?![a-p])")
 
 def should_report_conversation_token(token, is_test_fixture):
-    if token in known_synthetic_ids:
-        return False
     if is_test_fixture and token.startswith("synthetic-"):
         return False
     return True
 
 def should_report_share_token(token, is_test_fixture):
-    if token in {"...", "…"} or token in known_synthetic_ids:
-        return False
     if is_test_fixture and token.startswith("synthetic-"):
         return False
     return True
@@ -255,9 +228,17 @@ def should_report_share_token(token, is_test_fixture):
 assert should_report_conversation_token("private-conversation-token", False)
 assert should_report_conversation_token("ordinary-test-token", True)
 assert not should_report_conversation_token("synthetic-conversation", True)
+assert should_report_conversation_token("00000000-0000-4000-8000-000000000000", True)
+assert should_report_conversation_token("123e4567-e89b-12d3-a456-426614174000", True)
 assert should_report_share_token("arbitrary-private-share-token", False)
 assert should_report_share_token("ordinary-test-token", True)
 assert not should_report_share_token("synthetic-share", True)
+assert should_report_share_token("...", False)
+assert should_report_share_token("...", True)
+assert should_report_share_token("…", False)
+assert should_report_share_token("…", True)
+assert should_report_share_token("00000000-0000-4000-8000-000000000000", True)
+assert should_report_share_token("123e4567-e89b-12d3-a456-426614174000", True)
 assert should_report_share_token("t_" + "f" * 32, True)
 
 for path in sorted(Path(".").rglob("*")):
