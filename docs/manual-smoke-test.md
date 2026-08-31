@@ -1,6 +1,6 @@
 # Manual Smoke Test for v1.5.40
 
-This file preserves the v1.5.40 release procedure. Create a version-specific checklist for a newer release and do not report this historical checklist as current 1.5.47 live evidence.
+This file preserves the v1.5.40 release procedure. Create a version-specific checklist for each newer release and do not report this historical checklist as current live evidence.
 
 Use only a test vault and a new temporary ChatGPT conversation. Do not use private conversations or a main Obsidian vault.
 

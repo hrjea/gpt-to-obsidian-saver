@@ -2,7 +2,7 @@
 
 Native messaging is used because Chrome extensions cannot directly write arbitrary local files. The local native helper enables direct Markdown saves and HTML attachment copying into a configured Obsidian vault.
 
-This page is an operational installation guide. Release archive names below refer to the latest tagged/public v1.5.40 package, not the newer repository development version. The Native helper accepts only validated URI/ping/save requests and keeps all writes inside the configured Vault.
+This page is an operational installation guide for the latest tagged/public v1.5.50 package. The Native helper accepts only validated URI/ping/save requests and keeps all writes inside the configured Vault.
 
 ## Extension ID
 
@@ -21,7 +21,7 @@ Unpacked extension IDs can change when the extension is loaded from a different 
 
 ## macOS Installation
 
-Download and unzip `gpt-to-obsidian-saver-v1.5.40-native-host-macos.zip`, then run:
+Download and unzip `gpt-to-obsidian-saver-v1.5.50-native-host-macos.zip`, then run:
 
 ```sh
 ./installers/macos-install.sh --extension-id <extension-id>

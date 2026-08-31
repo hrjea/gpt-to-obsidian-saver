@@ -1,7 +1,7 @@
 // options.js
 const $ = (id) => document.getElementById(id);
-const BUILD_VERSION = "1.5.47";
-const CONTENT_SCRIPT_VERSION = "1.5.47";
+const BUILD_VERSION = "1.5.50";
+const CONTENT_SCRIPT_VERSION = "1.5.50";
 const SUPPORTED_LANGUAGES = ["en", "ko"];
 const DEFAULT_LANGUAGE = "en";
 const I18N = {

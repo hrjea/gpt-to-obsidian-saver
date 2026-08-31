@@ -23,9 +23,11 @@ Selected public-safe screenshots are also available in [assets/screenshots](asse
 - Preserves one exact generated detailed-Markdown artifact in the note when it can be safely resolved or downloaded for the current save.
 - Places the HTML learning-material section at the top of notes that contain real HTML attachments.
 - Optionally uses the previous Q&A pair when saving HTML learning notes.
+- Saves supported interactive-app responses as consented, Native-only remote references backed by a strictly validated ChatGPT Share URL.
+- Keeps explicit previous-answer Visualize requests separate from independent direct Visualize requests, and fails closed on ambiguous turn or Share evidence.
 - Provides English and Korean UI labels.
 
-The repository development version (1.5.47, not yet a tagged packaged release) also distinguishes explicitly approved partial rich-app notes from Native-only remote references backed by a strictly validated ChatGPT share URL. See [the public architecture](docs/architecture.md) for the current behavior and trust boundaries.
+Release 1.5.50 distinguishes explicitly approved partial rich-app notes from Native-only remote references, preserves truthful provider provenance, and adds bounded handling for ChatGPT's virtualized/remounted turns and response Share surfaces. See [the public architecture](docs/architecture.md) for the current behavior and trust boundaries.
 
 ## Supported Platforms
 
@@ -39,13 +41,13 @@ The repository development version (1.5.47, not yet a tagged packaged release) a
 
 The project is currently distributed through GitHub Releases only. It is installed as an unpacked Chrome extension.
 
-The latest tagged/public package documented below is v1.5.40. The repository development version is newer, so version fields, tests, [CHANGELOG.md](CHANGELOG.md), and [the public architecture](docs/architecture.md) must be inspected before treating development behavior as released.
+The latest tagged/public package documented below is v1.5.50. Verify the release checksums before installation.
 
 This project is not available through the Chrome Web Store. Do not expect Chrome Web Store installation, listing, review, or automatic update behavior.
 
 ## Install from GitHub Releases
 
-1. Download `gpt-to-obsidian-saver-v1.5.40-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.50-unpacked-extension.zip` from the GitHub Release.
 2. Verify the SHA-256 checksum from `SHA256SUMS.txt`.
 3. Unzip the file.
 4. Open `chrome://extensions`.
@@ -91,7 +93,7 @@ The native host allowed origin must match the actual extension ID shown by Chrom
 ### macOS Native Helper
 
 1. Copy the extension ID from `chrome://extensions`.
-2. Download and unzip `gpt-to-obsidian-saver-v1.5.40-native-host-macos.zip`.
+2. Download and unzip `gpt-to-obsidian-saver-v1.5.50-native-host-macos.zip`.
 3. Run:
 
 ```sh
@@ -186,7 +188,7 @@ If the previous pair is unavailable, the note falls back safely to the current q
 | `storage` | Stores extension settings such as language, vault name, folder path, and feature toggles. |
 | `nativeMessaging` | Calls the local native helper for direct vault writes and HTML attachment saving. |
 | `downloads` | Used only for a bounded active-save watch for an expected HTML or generated detailed-Markdown filename, so the exact current file can be copied/read by the local helper. The extension does not scan, upload, or transmit unrelated files. |
-| `clipboardRead` (optional, current development) | Requested only during an explicitly approved remote-reference Share flow. It may read one freshly copied value after a strict current-action success signal; only a validated ChatGPT share URL can be stored. |
+| `clipboardRead` (optional) | Requested only during an explicitly approved remote-reference Share flow. It may read one freshly copied value after a strict current-action success signal; only a validated ChatGPT share URL can be stored. |
 | `https://chatgpt.com/*` | Injects the Save to Obsidian button and reads the selected ChatGPT message when the user invokes saving. |
 | `https://chat.openai.com/*` | Supports the older ChatGPT domain with the same behavior. |
 
@@ -196,7 +198,7 @@ See [docs/permissions.md](docs/permissions.md).
 
 The extension processes ChatGPT page content locally when the user clicks Save to Obsidian. It stores settings in Chrome extension storage and saves notes locally through Obsidian URI mode or Chrome Native Messaging. It does not add analytics, telemetry, tracking, developer-operated remote storage, or data sale behavior.
 
-Current development has one explicit remote-sharing exception: after separate consent, it may operate ChatGPT's visible Share UI and store a validated ChatGPT share URL as an online-only reference. It does not upload Vault notes or attachments to a developer service, and it does not claim the shared app is a local copy.
+The extension has one explicit remote-sharing exception: after separate consent, it may operate ChatGPT's visible Share UI and store a validated ChatGPT share URL as an online-only reference. It does not upload Vault notes or attachments to a developer service, and it does not claim the shared app is a local copy.
 
 The current page URL can be recorded as the note source. Native-helper mode uses the configured local vault path to write notes and attachments.
 

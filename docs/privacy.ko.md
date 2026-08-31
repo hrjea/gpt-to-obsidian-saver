@@ -8,6 +8,8 @@ GPT to Obsidian Saver는 local-first이며 사용자가 직접 실행한 저장 
 
 대화 텍스트는 브라우저 확장 프로그램 안에서 로컬로 처리됩니다. 현재 ChatGPT 페이지 URL은 Markdown frontmatter의 note source로 기록될 수 있습니다.
 
+바로 이전 답변을 명시적으로 가리키는 Visualize 요청에서 필요한 대화 turn이 일시적으로 DOM에서 사라진 경우, 확장 프로그램은 현재 대화를 제한된 범위에서 잠시 스크롤해 인접한 가상화 창의 순서를 검증한 뒤 논리적 위치를 복원할 수 있습니다. 안정된 클릭 창에서 A2 바로 다음의 role-bearing turn이 유일하게 확인되면 그 turn의 메모리 내 identity/content fingerprint와 scroller 기준 픽셀 offset을 초기 복원 위치 계산에 한 번만 사용할 수 있습니다. 이 following-turn anchor는 노트 내용이나 대화 순서 증거가 아니며, 동의 이후 복구에는 재사용되지 않습니다. Q2/A2만 보이는 경우에는 A1/Q2 overlap 다음 Q1/A1 overlap을 모두 요구하며, 복구된 A1은 Markdown 변환용 독립 메모리 clone으로만 유지되고 ChatGPT UI 조작에는 사용되지 않습니다. 동의 중 검증된 missing-only 창이 생기면 callback 안에서는 스크롤하거나 복구하지 않고, 승인된 동의가 돌아온 뒤 정확한 원래 A2와 production conversation scroller를 유지한 채 한 번의 제한된 복구로 필요한 A1/Q2를 다시 결합할 수 있습니다. 응답 Share가 앱 iframe을 최종 surface로 이동시키는 경우에도 A2의 사전 증거와 메모리 내 source fingerprint·구조 개수만 비교합니다. turn 텍스트, identity, 변환 clone, 이동 증거, rich-app runtime 증거는 현재 저장 시도의 메모리에만 남고 로그·저장·전송되지 않으며 시도가 끝나면 폐기됩니다.
+
 지원되는 상호작용형 앱 답변에서는 별도의 명시적 동의를 받은 ChatGPT 공유 절차를 제안할 수 있습니다. 이 동작은 ChatGPT에 호스팅되는 공유링크를 생성·갱신·재사용하거나 복사할 수 있습니다. Obsidian 노트에는 엄격하게 검증된 ChatGPT 공유 URL만 원격 참조로 저장되며, 앱의 오프라인 복사본을 뜻하지 않습니다. 전체 대화 공유 fallback은 응답 단위 링크보다 범위가 넓으므로 별도 동의를 요구합니다.
 
 ## 설정 저장
@@ -25,7 +27,7 @@ GPT to Obsidian Saver는 local-first이며 사용자가 직접 실행한 저장 
 
 ## 선택적 Clipboard Permission
 
-선택적 `clipboardRead` permission은 사용자가 원격 참조 공유 절차를 명시적으로 승인한 경우에만 요청할 수 있습니다. 확장 프로그램은 현재 동작에 대한 새롭고 엄격한 복사 성공 신호가 확인된 뒤 clipboard 값을 최대 한 번 읽습니다. 원시 clipboard/manual 값은 로그나 저장소에 남기지 않으며, 엄격한 ChatGPT 공유 URL 검증을 통과한 값만 노트에 들어갑니다.
+선택적 `clipboardRead` permission은 사용자가 원격 참조 공유 절차를 명시적으로 승인한 경우에만 요청할 수 있습니다. 동의 흐름에서 permission을 요청하기 직전에 확장 프로그램은 runtime과 현재 hydrated conversation proof를 다시 검증합니다. 불일치하면 Chrome에 permission을 요청하기 전에 중단합니다. 단, 엄격하게 검증된 missing-only 가상화 창은 permission 요청을 0회로 건너뛰고 승인된 동의가 돌아온 뒤의 제한된 복구로 넘깁니다. 동의 callback 안에서는 복구 스크롤을 하지 않으며, 건너뛴 permission을 이후 자동으로 다시 요청하지도 않습니다. 이 경우 clipboard 읽기는 비활성 상태로 유지되고 확장 프로그램이 소유한 빈 manual URL 입력창을 사용할 수 있습니다. permission이 있고 현재 동작에 대한 새롭고 엄격한 복사 성공 신호까지 확인된 경우에만 clipboard 값을 최대 한 번 읽습니다. 원시 clipboard/manual 값은 로그나 저장소에 남기지 않으며, 엄격한 ChatGPT 공유 URL 검증을 통과한 값만 노트에 들어갑니다.
 
 ## 로컬 저장
 

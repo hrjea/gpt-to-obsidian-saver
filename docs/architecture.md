@@ -1,6 +1,6 @@
 # Architecture
 
-Status: public architecture overview for development version 1.5.47. Tagged release documentation may still target v1.5.40.
+Status: public architecture overview for tagged release v1.5.50.
 
 ## System context
 
@@ -26,6 +26,7 @@ There is no developer-operated application server. Ordinary extraction and savin
 
 - Injects `Obsidian 저장` / `Save to Obsidian` buttons into eligible assistant messages.
 - Identifies current and previous Q&A context by verified message roles and turn structure.
+- Recovers an explicitly referenced previous Q&A across bounded, attempt-local ChatGPT turn-virtualization windows and restores the logical scroll position before Share/write boundaries.
 - Converts selected ChatGPT DOM content to Markdown.
 - Detects file-like deliverables, generated detailed Markdown, HTML artifacts, and rich app blocks.
 - Performs capture-integrity, runtime, path/assembly, and share preflight checks.
@@ -67,7 +68,7 @@ There is no developer-operated application server. Ordinary extraction and savin
 
 - Platform installers register a user-level Native Messaging host for one extension ID.
 - `scripts/validate-release.sh` is the automated project gate.
-- `scripts/package-release.sh` validates, packages platform artifacts, checks archive hygiene, and writes checksums.
+- `scripts/package-release.sh` requires a clean committed Git tree, packages platform artifacts from explicit file allowlists, checks archive hygiene, and writes checksums.
 
 ## Save flows
 
@@ -96,14 +97,16 @@ When an app block has no verified complete local representation and no approved 
 
 ### 4. Response-scoped remote-reference flow
 
-1. Resolve `previous-qa`, `direct-visualize`, or provider-neutral `rich-app-continuation` context.
-2. Complete all read-only context, artifact, file, Markdown, title/path, runtime, and Native preflight checks.
-3. Ask for share/clipboard consent.
-4. Re-resolve one Share control inside the current assistant response action toolbar immediately before clicking.
-5. Reuse or create a link through a classified visible share surface.
-6. Accept a URL only through the strict final validator.
-7. Build mode-specific `remote-reference` Markdown.
-8. Save through Native only. URI fallback is forbidden for this flow.
+1. Resolve structured `previous-qa` or `direct-visualize`, provider-neutral `previous-qa-rich-app`, or provider-neutral `rich-app-continuation` context. Text or history alone never proves a provider.
+2. Freeze the selected Q2/A2 identity, content, app/runtime proof, route, and production conversation scroller. Explicit previous-answer requests may join only the approved adjacent virtualized windows through exact role/content/identity overlap.
+3. Restore the logical position and reacquire the exact target. An optional first-following-turn geometry anchor is navigation-only; it cannot prove chronology, note content, or Share scope.
+4. Complete all remaining read-only context, artifact, file, Markdown, title/path, runtime, and Native preflight checks.
+5. Ask for Share/clipboard consent. Immediately before an optional clipboard permission request, revalidate the current proof. A narrowly verified missing-only A1/Q2 window skips permission and defers one bounded recovery until after approved consent; recovery never runs in the consent callback and never replaces A2.
+6. Re-resolve one Share control inside the already approved response or separately consented conversation scope immediately before clicking.
+7. Reuse or create a link through one classified visible Share surface. Hydrated response flows admit DOM remounts or iframe portal movement only when the fresh surface family and exact source proof remain unique and current.
+8. Accept a URL only through the strict final validator. Copy/clipboard/surface awaits are rechecked before the next effect.
+9. Build mode-specific `remote-reference` Markdown with truthful provider provenance.
+10. Save through Native only. URI fallback is forbidden for this flow.
 
 ### 5. Whole-conversation remote-reference fallback
 
@@ -119,11 +122,11 @@ This fallback is broader than response sharing and has a separate consent bounda
 
 ### ChatGPT DOM
 
-ChatGPT page structure is untrusted and changes over time. Role, turn, file, viewer, app, toolbar, dialog, status, and URL candidates must be structurally validated and unique. Text similarity alone is not sufficient provenance.
+ChatGPT page structure is untrusted and changes over time. Role, turn, file, viewer, app, toolbar, dialog, status, and URL candidates must be structurally validated and unique. One mounted DOM window is not assumed to contain the complete chronology; virtualized windows may be joined only through exact bounded overlap proof. A detached A1 conversion clone and a following-turn geometry anchor cannot operate Share UI or establish chronology. Response Share portal/remount evidence is attempt-local. Text similarity alone is not sufficient provenance.
 
 ### Clipboard
 
-Clipboard access is optional. It is requested only during an approved share flow and may be read once only after a fresh strict success signal. Raw values are not logged or persisted; only a validated URL may enter a note.
+Clipboard access is optional. It is requested only during an approved Share flow after an immediate runtime/current-context guard, and may be read once only after a fresh strict success signal. A verified missing-only hydration window skips the request and never triggers it automatically after recovery. Raw values are not logged or persisted; only a validated URL may enter a note.
 
 ### Background service worker
 

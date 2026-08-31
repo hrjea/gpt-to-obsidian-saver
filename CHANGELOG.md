@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.5.50] - 2026-08-31
+
+- Pair Visualize notes with the intended conversation context: explicit previous-answer requests save Q1/A1, while independent requests and Korean negation forms such as `말고` or `아니라` save Q2/A2.
+- Recover verified previous-answer Visualize targets across bounded ChatGPT turn virtualization and consent-time remounts, while failing closed on changed routes, ambiguous chronology, mismatched overlap, or unsafe restoration geometry.
+- Harden response-specific Share handling across portal and remounted surfaces, strict current-turn validation, copied/created-link flows, permission changes, and stale or competing controls.
+- Add a provider-neutral previous-Q&A remote-reference path for a narrowly verified rich-app topology without claiming Visualize provenance when the provider marker is absent.
+- Use the same structured Visualize marker resolver for routing, pairing, and marker removal, including current ID-less mention markup while preserving ordinary authored icons and text.
+- Remove embedded local identifiers from release tooling, require a clean committed tree, copy extension assets from an explicit file allowlist, and strengthen Public inventory, synthetic-fixture, privacy, URL, extension-ID, artifact, and archive-boundary validation.
+- Extend deterministic regression coverage for long virtualized conversations, action-time consent recovery, ID-less markers, Korean exclusions, Share remounts, and fail-closed negative cases.
+
 ## [1.5.47] - 2026-08-29
 
 - Support conversation-header Share builds that copy an existing public link immediately without opening a dialog, using a fresh whole-conversation status signal and the existing strict clipboard/manual URL boundary.

@@ -1,12 +1,13 @@
 
-// content.js (1.5.47) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.50) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.47";
+  const VERSION = "1.5.50";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
   state.recentSaves = state.recentSaves || new Map();
   state.activeSaves = state.activeSaves || new Set();
+  state.activeVisualizeAttempts = state.activeVisualizeAttempts || new Set();
   const generation = state.generation;
   const DEBUG = false;
   const ARTIFACT_DEBUG = false;
@@ -28,6 +29,9 @@
   const SHARE_DIALOG_TIMEOUT_MS = 10000;
   const SHARE_URL_TIMEOUT_MS = 15000;
   const SHARE_POLL_MS = 100;
+  const VERIFIED_RESPONSE_SHARE_SURFACE_MISSING = "verified response Share surface is missing or ambiguous";
+  const RESPONSE_SHARE_IFRAME_DUPLICATED = "response Share duplicated the verified A2 iframe source";
+  const RESPONSE_SHARE_IFRAME_RELOCATION_MISMATCH = "response Share iframe relocation did not preserve the A2 source proof";
   const FILE_DELIVERABLE_EXTENSIONS = ["html", "htm", "md", "mm", "json", "zip"];
 
   const SUPPORTED_LANGUAGES = ["en", "ko"];
@@ -411,6 +415,8 @@
     return {
       source: String(sourceUrl || ""),
       visualizeShareUrl: normalizeChatGptShareUrl(shareUrl),
+      appProvider: "visualize",
+      appProvenance: "verified",
       captureStatus: "remote-reference",
       captureMode: String(captureMode || "previous-qa-visualize-share-link"),
       richArtifactsExpected: expected,
@@ -444,6 +450,8 @@
       `title: ${yamlQuote(titleText)}`,
       `source: ${yamlQuote(sourceText)}`,
       'visualize_share_url: "{{validatedChatGptShareUrl}}"',
+      "app_provider: visualize",
+      "app_provenance: verified",
       `created: ${yamlQuote(nowIso())}`,
       "tags: [chatgpt, visualize, capture]",
       "capture_status: remote-reference",
@@ -499,6 +507,8 @@
       `title: ${yamlQuote(title)}`,
       `source: ${yamlQuote(metadata.source)}`,
       `visualize_share_url: ${yamlQuote(metadata.visualizeShareUrl)}`,
+      `app_provider: ${metadata.appProvider}`,
+      `app_provenance: ${metadata.appProvenance}`,
       `created: ${yamlQuote(created)}`,
       "tags: [chatgpt, visualize, capture]",
       `capture_status: ${metadata.captureStatus}`,
@@ -580,8 +590,16 @@
 
   function conversationShareCaptureMode(bodyMode) {
     if (bodyMode === "direct-visualize") return "direct-visualize-conversation-share-link";
+    if (bodyMode === "previous-qa-rich-app") return "previous-qa-rich-app-conversation-share-link";
     if (bodyMode === "rich-app-continuation") return "rich-app-continuation-conversation-share-link";
     return "previous-qa-conversation-share-link";
+  }
+
+  function conversationShareAppProvenance(bodyMode) {
+    if (bodyMode === "previous-qa-rich-app" || bodyMode === "rich-app-continuation") {
+      return { provider: "unknown", provenance: "unverified" };
+    }
+    return { provider: "visualize", provenance: "verified" };
   }
 
   function buildConversationShareMarkdownDraft({
@@ -601,6 +619,7 @@
     const explanation = String(explanationText || "").trim();
     const target = String(targetTurnId || "").trim();
     const mode = conversationShareCaptureMode(bodyMode);
+    const appProvenance = conversationShareAppProvenance(bodyMode);
     const expected = Math.max(0, Number(richArtifactsExpected) || 0);
     if (!titleText || !sourceText || !question || !target) return "";
     const lines = [
@@ -608,6 +627,8 @@
       `title: ${yamlQuote(titleText)}`,
       `source: ${yamlQuote(sourceText)}`,
       'conversation_share_url: "{{validatedChatGptShareUrl}}"',
+      `app_provider: ${appProvenance.provider}`,
+      `app_provenance: ${appProvenance.provenance}`,
       "capture_status: remote-reference",
       `capture_mode: ${mode}`,
       "share_scope: conversation",
@@ -669,13 +690,16 @@
     const question = String(questionText || "").trim();
     const answer = String(answerText || "").trim();
     const explanation = String(explanationText || "").trim();
+    const appProvenance = conversationShareAppProvenance(bodyMode);
     if (!metadata || !String(title || "").trim() || !question) return "";
-    if (bodyMode === "previous-qa" && !answer) return "";
+    if ((bodyMode === "previous-qa" || bodyMode === "previous-qa-rich-app") && !answer) return "";
     const lines = [
       "---",
       `title: ${yamlQuote(title)}`,
       `source: ${yamlQuote(metadata.source)}`,
       `conversation_share_url: ${yamlQuote(metadata.conversationShareUrl)}`,
+      `app_provider: ${appProvenance.provider}`,
+      `app_provenance: ${appProvenance.provenance}`,
       `capture_status: ${metadata.captureStatus}`,
       `capture_mode: ${metadata.captureMode}`,
       `share_scope: ${metadata.shareScope}`,
@@ -741,6 +765,8 @@
       `title: ${yamlQuote(titleText)}`,
       `source: ${yamlQuote(metadata.source)}`,
       `visualize_share_url: ${yamlQuote(metadata.visualizeShareUrl)}`,
+      `app_provider: ${metadata.appProvider}`,
+      `app_provenance: ${metadata.appProvenance}`,
       `created: ${yamlQuote(nowIso())}`,
       "tags: [chatgpt, visualize, capture]",
       `capture_status: ${metadata.captureStatus}`,
@@ -790,6 +816,8 @@
       `title: ${yamlQuote(titleText)}`,
       `source: ${yamlQuote(sourceText)}`,
       'visualize_share_url: "{{validatedChatGptShareUrl}}"',
+      "app_provider: visualize",
+      "app_provenance: verified",
       `created: ${yamlQuote(nowIso())}`,
       "tags: [chatgpt, visualize, capture]",
       "capture_status: remote-reference",
@@ -870,6 +898,114 @@
     return `> [!warning] ${t("richAppReferenceWarningTitle")}\n> ${t("richAppReferenceWarningBody")}`;
   }
 
+  function buildPreviousQaRichAppShareMarkdownDraft({
+    title,
+    sourceUrl,
+    questionText,
+    answerText,
+    richArtifactsExpected = 1
+  } = {}) {
+    const titleText = String(title || "").trim();
+    const sourceText = String(sourceUrl || "").trim();
+    const question = String(questionText || "").trim();
+    const answer = String(answerText || "").trim();
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    if (!titleText || !sourceText || !question || !answer) return "";
+    const lines = [
+      "---",
+      `title: ${yamlQuote(titleText)}`,
+      `source: ${yamlQuote(sourceText)}`,
+      'rich_app_share_url: "{{validatedChatGptShareUrl}}"',
+      "app_provider: unknown",
+      "app_provenance: unverified",
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, app, capture]",
+      "capture_status: remote-reference",
+      "capture_mode: previous-qa-rich-app-share-link",
+      `rich_artifacts_expected: ${expected}`,
+      "rich_artifacts_local_complete: 0",
+      `rich_artifacts_remote_referenced: ${expected}`,
+      "interactive_behavior_preserved: remote-only",
+      "offline_available: false",
+      "---",
+      ""
+    ];
+    if (settings && settings.bodyTitle) lines.push(`# ${titleText}`, "");
+    lines.push(
+      `# ${t("richAppShareHeading")}`,
+      "",
+      `[${t("richAppShareOpenLink")}]({{validatedChatGptShareUrl}})`,
+      "",
+      buildRichAppShareReferenceWarning(),
+      "",
+      `# ${t("originalQuestionHeading")}`,
+      "",
+      question,
+      "",
+      `# ${t("originalAnswerHeading")}`,
+      "",
+      answer
+    );
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
+  function buildPreviousQaRichAppShareMarkdown({
+    title,
+    sourceUrl,
+    shareUrl,
+    questionText,
+    answerText,
+    attachmentMarker = "",
+    richArtifactsExpected = 1,
+    richArtifactsRemoteReferenced = richArtifactsExpected
+  } = {}) {
+    const normalizedShareUrl = validateStrictChatGptShareUrl(shareUrl);
+    const titleText = String(title || "").trim();
+    const sourceText = String(sourceUrl || "").trim();
+    const question = String(questionText || "").trim();
+    const answer = String(answerText || "").trim();
+    const expected = Math.max(0, Number(richArtifactsExpected) || 0);
+    const remoteReferenced = Math.max(0, Math.min(expected, Number(richArtifactsRemoteReferenced) || 0));
+    if (!normalizedShareUrl || !titleText || !sourceText || !question || !answer) return "";
+    const lines = [
+      "---",
+      `title: ${yamlQuote(titleText)}`,
+      `source: ${yamlQuote(sourceText)}`,
+      `rich_app_share_url: ${yamlQuote(normalizedShareUrl)}`,
+      "app_provider: unknown",
+      "app_provenance: unverified",
+      `created: ${yamlQuote(nowIso())}`,
+      "tags: [chatgpt, app, capture]",
+      "capture_status: remote-reference",
+      "capture_mode: previous-qa-rich-app-share-link",
+      `rich_artifacts_expected: ${expected}`,
+      "rich_artifacts_local_complete: 0",
+      `rich_artifacts_remote_referenced: ${remoteReferenced}`,
+      "interactive_behavior_preserved: remote-only",
+      "offline_available: false",
+      "---",
+      ""
+    ];
+    if (settings && settings.bodyTitle) lines.push(`# ${titleText}`, "");
+    lines.push(
+      `# ${t("richAppShareHeading")}`,
+      "",
+      `[${t("richAppShareOpenLink")}](${normalizedShareUrl})`,
+      "",
+      buildRichAppShareReferenceWarning(),
+      "",
+      `# ${t("originalQuestionHeading")}`,
+      "",
+      question,
+      "",
+      `# ${t("originalAnswerHeading")}`,
+      "",
+      answer
+    );
+    if (attachmentMarker) lines.push("", attachmentMarker);
+    return removeEmptyMarkdownLinkTargets(lines.join("\n"));
+  }
+
   function buildRichAppContinuationShareMarkdown({
     title,
     sourceUrl,
@@ -941,12 +1077,18 @@
     if (!currentAssistantNode) return { ok: false, stage: "preflight", reason: "current assistant node was not found" };
     const mode = visualizeContext?.mode || "previous-qa";
     const isRichAppContinuation = mode === "rich-app-continuation";
-    const resolvedPreviousQa = mode === "previous-qa" ? (previousQa || visualizeContext) : null;
+    const isPreviousQaRichApp = mode === "previous-qa-rich-app";
+    const isProviderNeutralRichApp = isRichAppContinuation || isPreviousQaRichApp;
+    const resolvedPreviousQa = mode === "previous-qa" || isPreviousQaRichApp
+      ? (previousQa || visualizeContext)
+      : null;
     const requestNode = mode === "direct-visualize"
       ? visualizeContext?.visualizeRequestNode
       : isRichAppContinuation
         ? visualizeContext?.requestNode
-        : resolvedPreviousQa?.requestNode || resolvedPreviousQa?.visualizeRequestNode;
+        : isPreviousQaRichApp
+          ? visualizeContext?.requestNode
+          : resolvedPreviousQa?.requestNode || resolvedPreviousQa?.visualizeRequestNode;
     const questionText = mode === "direct-visualize" || isRichAppContinuation
       ? visualizeContext?.questionText
       : resolvedPreviousQa?.questionText;
@@ -959,6 +1101,11 @@
           !isExplicitVisualizeRequestNode(visualizeContext.visualizeRequestNode)) {
         return { ok: false, stage: "preflight", reason: "direct Visualize context could not be resolved" };
       }
+    } else if (isPreviousQaRichApp) {
+      const freshContext = revalidatePreviousQaRichAppContext(currentAssistantNode, visualizeContext);
+      if (!freshContext.ok || !questionText || !answerText || !resolvedPreviousQa?.requestNode || !resolvedPreviousQa?.answerNode) {
+        return { ok: false, stage: "preflight", reason: freshContext.reason || "provider-neutral previous-Q&A rich app context could not be resolved" };
+      }
     } else if (isRichAppContinuation) {
       if (!visualizeContext?.currentAppAnswerNode || visualizeContext.currentAppAnswerNode !== currentAssistantNode ||
           !visualizeContext?.previousAppAnswerNode ||
@@ -969,7 +1116,7 @@
     } else if (!questionText || !answerText || !resolvedPreviousQa?.requestNode || !resolvedPreviousQa?.answerNode) {
       return { ok: false, stage: "preflight", reason: "Q1/A1/Q2 could not be resolved" };
     }
-    if (!isRichAppContinuation && !isVisualizeShareCandidate(currentAssistantNode, { requestNode })) {
+    if (!isProviderNeutralRichApp && !isVisualizeShareCandidate(currentAssistantNode, { requestNode })) {
       return { ok: false, stage: "preflight", reason: "the response is not a structurally identified Visualize app block" };
     }
     if (runtimeGuard?.check) {
@@ -1007,7 +1154,7 @@
       generatedMarkdown: {},
       failures: []
     });
-    const localRichExpected = mode === "previous-qa"
+    const localRichExpected = mode === "previous-qa" || isPreviousQaRichApp
       ? collectRichAppBlockCandidates(resolvedPreviousQa.answerNode, { idPrefix: "a1-rich" })
       : [];
     const localRichIntegrity = assessRichArtifactIntegrity({ expected: localRichExpected, captures: [] });
@@ -1023,9 +1170,11 @@
     const targetTurnId = String(currentTurn?.getAttribute?.("data-turn-id") || "").trim();
     const markdown = mode === "direct-visualize"
       ? buildDirectVisualizeShareMarkdownDraft({ title, sourceUrl, questionText, explanationText, richArtifactsExpected })
-      : isRichAppContinuation
-        ? buildRichAppContinuationShareMarkdownDraft({ title, sourceUrl, questionText, explanationText, richArtifactsExpected })
-        : buildVisualizeShareMarkdownDraft({ title, sourceUrl, questionText, answerText, richArtifactsExpected });
+      : isPreviousQaRichApp
+        ? buildPreviousQaRichAppShareMarkdownDraft({ title, sourceUrl, questionText, answerText, richArtifactsExpected })
+        : isRichAppContinuation
+          ? buildRichAppContinuationShareMarkdownDraft({ title, sourceUrl, questionText, explanationText, richArtifactsExpected })
+          : buildVisualizeShareMarkdownDraft({ title, sourceUrl, questionText, answerText, richArtifactsExpected });
     if (!title || !filePath || !markdown) {
       return { ok: false, stage: "preflight", reason: "title, note path, or Markdown could not be assembled" };
     }
@@ -1166,6 +1315,20 @@
     if (!runtimeStatus?.ok) {
       notifyRuntimeFailure(runtimeStatus, "native-save");
       return runtimeStatus;
+    }
+    const contextStatus = validateShareContextBoundary(
+      { validateShareContext: options.validateContext },
+      "native-save",
+      "preflight"
+    );
+    if (!contextStatus.ok) {
+      return {
+        ok: false,
+        stage: contextStatus.stage,
+        error: contextStatus.reason,
+        reason: contextStatus.reason,
+        fallbackAttempted: false
+      };
     }
 
     const response = await awaitWithRuntimeGuard(
@@ -1366,7 +1529,7 @@
 
   function isVisualizePluginId(value) {
     const text = String(value || "").trim().toLowerCase();
-    return text === "plugin:visualize" || /(?:^|[:/_-])visualize(?:$|[:/_-])/.test(text);
+    return text === "plugin:visualize";
   }
 
   function isVisualizePluginMention(node) {
@@ -1392,24 +1555,11 @@
       } catch {}
     }
 
-    const label = [
-      node.getAttribute?.("aria-label") || "",
-      node.getAttribute?.("title") || "",
-      node.innerText || node.textContent || ""
-    ].join(" ").replace(/\s+/g, " ").trim();
-    return /\bvisualize\b/i.test(label);
+    return false;
   }
 
   function isVisualizeRequestNode(node) {
-    if (!node) return false;
-    const mentionSelector = [
-      "[data-id^='plugin:']",
-      "[data-plugin-id]",
-      "[data-inline-selection-pill]",
-      "[data-testid*='plugin' i]"
-    ].join(",");
-    const mentions = nodesIncludingRoot(node, mentionSelector);
-    return mentions.some(isVisualizePluginMention);
+    return verifiedVisualizeRequestMarkerNodes(node).length > 0;
   }
 
   function hasEarlierAssistantResponseVariant(currentAssistantNode) {
@@ -1835,7 +1985,7 @@
     const question = findPreviousMessageByRole(nodes, answer.index, "user");
     if (!question) return null;
 
-    const extractQuestion = options.extractQuestion || ((node) => cleanQuestionText(messageNodeToPlainText(node)));
+    const extractQuestion = options.extractQuestion || questionNodeToPlainText;
     const extractAnswer = options.extractAnswer || assistantNodeToMarkdown;
     const questionText = cleanQuestionText(extractQuestion(question.node) || "");
     const answerText = stripChatGptFooterLines(cleanAnswerText(repairFencedCodeBlocks(extractAnswer(answer.node) || "")));
@@ -1856,44 +2006,153 @@
   // captures, so changing its meaning would make a missing/virtualized Q1/A1
   // pair look like a valid direct capture.
   function isExplicitVisualizeRequestNode(node) {
-    if (!node) return false;
-    const idNodes = nodesIncludingRoot(node, "[data-id], [data-plugin-id]");
-    if (idNodes.some(candidate => {
-      const dataId = String(candidate.getAttribute?.("data-id") || "").trim();
-      const pluginId = String(candidate.getAttribute?.("data-plugin-id") || "").trim();
-      return dataId.toLowerCase() === "plugin:visualize" || isVisualizePluginId(pluginId);
-    })) return true;
-
-    const iconNodes = nodesIncludingRoot(node, "img, svg, [data-src]");
-    return iconNodes.some(icon => {
-      const rawSrc = String(
-        icon.getAttribute?.("src") ||
-        icon.getAttribute?.("data-src") ||
-        icon.getAttribute?.("href") ||
-        ""
-      ).trim();
-      if (!rawSrc) return false;
-      try {
-        const iconUrl = new URL(rawSrc, location.href);
-        return iconUrl.hostname === "chatgpt.com" && iconUrl.pathname === "/images/visualize/app-blocks-visualize.svg";
-      } catch {
-        return false;
-      }
-    });
+    return verifiedVisualizeRequestMarkerNodes(node).length > 0;
   }
 
-  function visualizeRequestNodeToPlainText(node) {
+  function verifiedVisualizeRequestMarkerNodes(root) {
+    if (!root) return [];
+    const exactIdMarkers = nodesIncludingRoot(root, "[data-id], [data-plugin-id]").filter(candidate => {
+      const dataId = String(candidate.getAttribute?.("data-id") || "").trim().toLowerCase();
+      const pluginId = String(candidate.getAttribute?.("data-plugin-id") || "").trim().toLowerCase();
+      return dataId === "plugin:visualize" || pluginId === "plugin:visualize";
+    });
+
+    const iconMarkers = [];
+    for (const icon of nodesIncludingRoot(root, "img, svg, [data-src]")) {
+      if (!isVisualizePluginMention(icon)) continue;
+      let current = icon.parentElement || null;
+      let marker = null;
+      while (current && current !== root) {
+        const text = String(current.innerText || current.textContent || "")
+          .replace(/\u00a0/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const hasPluginStructure = nodesIncludingRoot(current, [
+          "[data-id^='plugin:']",
+          "[data-plugin-id]",
+          "[data-inline-selection-pill]",
+          "[data-testid*='plugin' i]"
+        ].join(",")).length > 0;
+        if (hasPluginStructure && /^@?visualize$/i.test(text)) marker = current;
+        current = current.parentElement || null;
+      }
+      if (marker) iconMarkers.push(marker);
+    }
+
+    const candidates = Array.from(new Set([...exactIdMarkers, ...iconMarkers]));
+    const containsDescendant = (ancestor, descendant) => {
+      let current = descendant?.parentElement || null;
+      while (current) {
+        if (current === ancestor) return true;
+        current = current.parentElement || null;
+      }
+      return false;
+    };
+    return candidates.filter(candidate => !candidates.some(other =>
+      other !== candidate && containsDescendant(other, candidate)
+    ));
+  }
+
+  function removeVerifiedVisualizeRequestMarker(marker) {
+    const parent = marker?.parentElement || null;
+    const siblings = parent?.childNodes || [];
+    const index = Array.prototype.indexOf.call(siblings, marker);
+    const previous = index > 0 ? siblings[index - 1] : null;
+    const next = index >= 0 && index + 1 < siblings.length ? siblings[index + 1] : null;
+    const boundaryTextNode = (node, fromEnd) => {
+      let current = node;
+      while (current && current.nodeType !== 3) {
+        const children = current.childNodes || [];
+        if (!children.length) return null;
+        current = fromEnd ? children[children.length - 1] : children[0];
+      }
+      return current?.nodeType === 3 ? current : null;
+    };
+    const previousTextNode = boundaryTextNode(previous, true);
+    const nextTextNode = boundaryTextNode(next, false);
+
+    // The live ChatGPT marker sits between two authored text nodes. Replace
+    // only that structural seam with one space; do not flatten line breaks or
+    // other whitespace elsewhere in the user's prompt.
+    if (previousTextNode && nextTextNode) {
+      const previousRaw = String(previousTextNode.nodeValue ?? previousTextNode.textContent ?? "");
+      const nextRaw = String(nextTextNode.nodeValue ?? nextTextNode.textContent ?? "");
+      const trailingWhitespace = previousRaw.match(/[\s\u00a0]*$/u)?.[0] || "";
+      const leadingWhitespace = nextRaw.match(/^[\s\u00a0]*/u)?.[0] || "";
+      const previousText = trailingWhitespace
+        ? previousRaw.slice(0, previousRaw.length - trailingWhitespace.length)
+        : previousRaw;
+      const nextText = nextRaw.slice(leadingWhitespace.length);
+      const separator = previousText && nextText
+        ? /[\r\n]/.test(trailingWhitespace) ? "\n" : " "
+        : "";
+      previousTextNode.nodeValue = `${previousText}${separator}`;
+      nextTextNode.nodeValue = nextText;
+    }
+    marker.remove?.();
+  }
+
+  function questionNodeToPlainText(node) {
     if (!node) return "";
     let source = node;
     try {
       const clone = node.cloneNode?.(true);
       if (clone && clone !== node) {
-        nodesIncludingRoot(clone, "[data-id='plugin:visualize'], [data-plugin-id], [data-inline-selection-pill]")
-          .forEach(mention => mention.remove?.());
+        verifiedVisualizeRequestMarkerNodes(clone).forEach(removeVerifiedVisualizeRequestMarker);
         source = clone;
       }
     } catch {}
     return cleanQuestionText(messageNodeToPlainText(source));
+  }
+
+  function visualizeRequestNodeToPlainText(node) {
+    return questionNodeToPlainText(node);
+  }
+
+  function isPreviousAnswerVisualizationRequestText(value) {
+    const text = String(value || "")
+      .normalize("NFKC")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    if (!text) return false;
+
+    // Remove explicit negative references before looking for affirmative
+    // provenance. This keeps phrases such as "do not use this answer" from
+    // silently selecting A1 while still allowing a later affirmative
+    // "use the previous answer" clause to be recognized.
+    const affirmativeText = text
+      .replace(
+        /\b(?:do\s+not|don't|never)\s+(?:use|reuse|reference|include|visualize|base\s+(?:this|it)\s+on)\s+(?:(?:this|that|the|your|previous|prior|last|earlier|above)\s+)?(?:answer|response|reply|explanation|content)\b/g,
+        " "
+      )
+      .replace(
+        /(?:바로\s*)?(?:위(?:의|에\s*있는)?|이전(?:의)?|직전(?:의)?|앞(?:의|선)?|마지막(?:의)?)\s*(?:답변|응답|설명|내용)\s*(?:은|는|이|가|을|를)?\s*(?:말고|아니라|아닌|아니고)/g,
+        " "
+      )
+      .replace(
+        /(?:이|그|위(?:의|에\s*있는)?|이전(?:의)?|직전(?:의)?|앞(?:의|선)?|마지막(?:의)?)\s*(?:답변|응답|설명|내용)\s*(?:을|를)?\s*(?:사용|참조|활용|시각화)하지\s*말(?:고|아|라)?/g,
+        " "
+      )
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const koreanReferences = [
+      /(?:바로\s*)?(?:위(?:의|에\s*있는)?|이전(?:의)?|직전(?:의)?|앞(?:의|선)?|마지막(?:의)?)\s*(?:답변|응답|설명|내용)/,
+      /(?:방금|조금\s*전)\s*(?:답(?:한|해\s*준)|응답(?:한|해\s*준)|설명(?:한|해\s*준)|말(?:한|해\s*준)|작성(?:한|해\s*준))\s*(?:답변|응답|설명|내용|것)?/
+    ];
+    if (koreanReferences.some(pattern => pattern.test(affirmativeText))) return true;
+    if (/^(?:이|그)\s*(?:답변|응답|설명|내용)\s*(?:을|를)/.test(affirmativeText)) return true;
+
+    const englishReferences = [
+      /\b(?:(?:the|your)\s+)?(?:previous|prior|last|preceding|earlier|above)\s+(?:answer|response|reply|explanation|content)\b/,
+      /\b(?:answer|response|reply|explanation|content)\s+(?:above|before)\b/,
+      /\bwhat\s+(?:you\s+)?(?:just|previously)\s+(?:said|answered|explained|wrote)\b/,
+      /\b(?:answer|response|reply|explanation)\s+(?:you\s+)?(?:just|previously)\s+(?:gave|provided|wrote|explained)\b/
+    ];
+    if (englishReferences.some(pattern => pattern.test(affirmativeText))) return true;
+    return /^(?:please\s+)?(?:visualize|turn|show|render|convert|make|create)\b[^.!?;]{0,100}\bthis\s+(?:answer|response|reply|explanation|content)\b/.test(affirmativeText);
   }
 
   function extractDirectVisualizeExplanation(node) {
@@ -1913,8 +2172,9 @@
     return stripChatGptFooterLines(cleanAnswerText(String(node.innerText || node.textContent || "").trim()));
   }
 
-  function getVerifiedConversationTurnEntries() {
-    const roots = Array.from(document.querySelectorAll?.("[data-testid^='conversation-turn-']") || []);
+  function getVerifiedConversationTurnEntries(root = document) {
+    const scope = root?.querySelectorAll ? root : document;
+    const roots = Array.from(scope.querySelectorAll?.("[data-testid^='conversation-turn-']") || []);
     const topLevelRoots = roots.filter(root => !roots.some(other => (
       other !== root && other.contains?.(root) && other.matches?.("[data-testid^='conversation-turn-']")
     )));
@@ -1922,12 +2182,18 @@
 
     topLevelRoots.forEach((turn, order) => {
       const declaredRole = String(turn.getAttribute?.("data-turn") || "").trim().toLowerCase();
-      if (declaredRole && declaredRole !== "user" && declaredRole !== "assistant") return;
       const roleNodes = nodesIncludingRoot(turn, "[data-message-author-role]");
       const qaRoleNodes = roleNodes.filter(node => {
         const role = roleAttrForNode(node);
         return role === "user" || role === "assistant";
       });
+
+      if (declaredRole && declaredRole !== "user" && declaredRole !== "assistant") {
+        if (qaRoleNodes.length > 0) {
+          entries.push({ turn, order, ambiguous: true, role: "" });
+        }
+        return;
+      }
 
       if (declaredRole === "user" || declaredRole === "assistant") {
         if (qaRoleNodes.length !== 1 || roleAttrForNode(qaRoleNodes[0]) !== declaredRole) {
@@ -1947,8 +2213,1466 @@
     return entries;
   }
 
+  function conversationRouteKey() {
+    const href = String(location?.href || "").trim();
+    if (!href) return "";
+    try {
+      const url = new URL(href);
+      url.hash = "";
+      return url.href;
+    } catch {
+      return href.split("#", 1)[0];
+    }
+  }
+
+  function verifiedTurnIdentity(entry) {
+    const turn = entry?.turn || null;
+    const node = entry?.node || null;
+    if (!turn || !node) return "";
+    const turnId = String(
+      turn.getAttribute?.("data-turn-id") ||
+      turn.getAttribute?.("data-message-id") ||
+      node.getAttribute?.("data-message-id") ||
+      ""
+    ).trim();
+    const testId = String(turn.getAttribute?.("data-testid") || "").trim();
+    const elementId = String(turn.getAttribute?.("id") || "").trim();
+    // Use the strongest available identity, rather than a composite of stable
+    // and presentation attributes. ChatGPT may change data-testid/id when a
+    // virtualized turn remounts while preserving its actual turn/message ID.
+    if (turnId) return `turn:${turnId}`;
+    if (testId) return `test:${testId}`;
+    if (elementId) return `id:${elementId}`;
+    return "";
+  }
+
+  function verifiedTurnContainerIdentity(entry) {
+    const turn = entry?.turn || null;
+    if (!turn) return "";
+    const turnId = String(
+      turn.getAttribute?.("data-turn-id") ||
+      turn.getAttribute?.("data-message-id") ||
+      ""
+    ).trim();
+    const testId = String(turn.getAttribute?.("data-testid") || "").trim();
+    const elementId = String(turn.getAttribute?.("id") || "").trim();
+    if (turnId) return `turn:${turnId}`;
+    if (testId) return `test:${testId}`;
+    if (elementId) return `id:${elementId}`;
+    return "";
+  }
+
+  function stableTurnFingerprint(value) {
+    const text = String(value || "");
+    let first = 2166136261;
+    let second = 5381;
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      first ^= code;
+      first = Math.imul(first, 16777619);
+      second = ((second << 5) + second) ^ code;
+    }
+    return `${text.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
+  }
+
+  function hydrationTurnText(entry) {
+    const node = entry?.node || null;
+    if (!node) return "";
+    if (entry.role === "user") {
+      const text = isVisualizeRequestNode(node)
+        ? visualizeRequestNodeToPlainText(node)
+        : cleanQuestionText(messageNodeToPlainText(node));
+      return String(text || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+    }
+    let cloneIsIndependent = true;
+    try {
+      cloneIsIndependent = node.cloneNode?.(true) !== node;
+    } catch {
+      cloneIsIndependent = false;
+    }
+    const rendered = cloneIsIndependent
+      ? assistantNodeToMarkdown(node)
+      : String(node.innerText || node.textContent || "");
+    return stripChatGptFooterLines(cleanAnswerText(repairFencedCodeBlocks(
+      rendered || String(node.innerText || node.textContent || "")
+    )));
+  }
+
+  function hydrationRichAppStructure(node) {
+    if (!node) return [];
+    return nodesIncludingRoot(node, '[data-app-block-preview="true"]').map(block => {
+      const iframes = Array.from(block.querySelectorAll?.("iframe") || []);
+      return {
+        marker: String(block.getAttribute?.("data-app-block-preview") || ""),
+        iframeCount: iframes.length,
+        iframeSourceFingerprints: iframes.map(iframe => stableTurnFingerprint([
+          String(iframe.getAttribute?.("src") || "").trim(),
+          String(iframe.getAttribute?.("srcdoc") || "")
+        ].join("\u0000")))
+      };
+    });
+  }
+
+  function hydrationTurnProof(entry) {
+    if (!entry || entry.ambiguous || !entry.node || !entry.role) return "";
+    // Capture the rich-app structure before Markdown extraction. Real DOM
+    // extraction works on a clone; taking this first also keeps lightweight
+    // test doubles from hiding a runtime swap by mutating their fake clone.
+    const richAppStructure = entry.role === "assistant"
+      ? hydrationRichAppStructure(entry.node)
+      : [];
+    return {
+      role: entry.role,
+      text: hydrationTurnText(entry),
+      explicitVisualize: entry.role === "user" && isExplicitVisualizeRequestNode(entry.node),
+      richAppStructure
+    };
+  }
+
+  function hydrationTurnFingerprintFromProof(proof) {
+    return proof ? stableTurnFingerprint(JSON.stringify(proof)) : "";
+  }
+
+  function hydrationTurnCoreFingerprintFromProof(proof) {
+    if (!proof) return "";
+    return stableTurnFingerprint(JSON.stringify({
+      role: proof.role,
+      text: proof.text,
+      explicitVisualize: proof.explicitVisualize,
+      richAppBlockMarkers: Array.from(proof.richAppStructure || []).map(item => ({
+        marker: String(item?.marker || "")
+      }))
+    }));
+  }
+
+  function hydrationTurnFingerprint(entry) {
+    return hydrationTurnFingerprintFromProof(hydrationTurnProof(entry));
+  }
+
+  function captureHydrationTurn(entry) {
+    const key = verifiedTurnIdentity(entry);
+    const proof = hydrationTurnProof(entry);
+    const fingerprint = hydrationTurnFingerprintFromProof(proof);
+    if (!key || !fingerprint || entry?.ambiguous) return null;
+    return {
+      key,
+      role: entry.role,
+      fingerprint,
+      coreFingerprint: hydrationTurnCoreFingerprintFromProof(proof),
+      richAppStructure: Array.from(proof?.richAppStructure || [])
+    };
+  }
+
+  function captureFollowingHydrationNavigationAnchor(entries, a2Entry, scrollContainer) {
+    const a2Index = Array.from(entries || []).indexOf(a2Entry);
+    if (a2Index < 0 || !scrollContainer) return null;
+    const following = Array.from(entries || []).slice(a2Index + 1)
+      .find(entry => entry?.ambiguous || entry?.role === "user" || entry?.role === "assistant");
+    if (!following || following.ambiguous || !following.turn) return null;
+    const snapshot = captureHydrationTurn(following);
+    const containerIdentity = verifiedTurnContainerIdentity(following);
+    if (!snapshot || !containerIdentity || containerIdentity !== snapshot.key) return null;
+    const primaryIdentityMatches = Array.from(entries || [])
+      .filter(entry => verifiedTurnIdentity(entry) === snapshot.key);
+    const containerIdentityMatches = Array.from(entries || [])
+      .filter(entry => verifiedTurnContainerIdentity(entry) === containerIdentity);
+    if (primaryIdentityMatches.length !== 1 || primaryIdentityMatches[0] !== following ||
+        containerIdentityMatches.length !== 1 || containerIdentityMatches[0] !== following) return null;
+    let turnTop = NaN;
+    let scrollTop = NaN;
+    try {
+      turnTop = Number(following.turn.getBoundingClientRect?.().top);
+      scrollTop = Number(scrollContainer.getBoundingClientRect?.().top);
+    } catch {}
+    const relativeTop = turnTop - scrollTop;
+    if (!Number.isFinite(turnTop) || !Number.isFinite(scrollTop) || !Number.isFinite(relativeTop)) return null;
+    return Object.freeze({
+      snapshot: Object.freeze({ ...snapshot }),
+      relativeTop
+    });
+  }
+
+  function findHydrationTurnIdentity(entries, snapshot) {
+    if (!snapshot?.key) return { status: "conflict", reason: "virtualized turn identity is missing" };
+    const matches = entries.filter(entry => verifiedTurnIdentity(entry) === snapshot.key);
+    if (!matches.length) return { status: "missing" };
+    if (matches.length !== 1) {
+      return { status: "conflict", reason: "virtualized turn overlap has duplicate identities" };
+    }
+    const entry = matches[0];
+    if (entry.ambiguous || entry.role !== snapshot.role) {
+      return { status: "conflict", reason: "virtualized turn overlap role conflict" };
+    }
+    return { status: "found", entry };
+  }
+
+  function findHydrationTurn(entries, snapshot) {
+    const identityMatch = findHydrationTurnIdentity(entries, snapshot);
+    if (identityMatch.status !== "found") return identityMatch;
+    const entry = identityMatch.entry;
+    if (hydrationTurnFingerprint(entry) !== snapshot.fingerprint) {
+      return { status: "conflict", reason: "virtualized turn overlap fingerprint mismatch" };
+    }
+    return { status: "found", entry };
+  }
+
+  function hydrationRichAppBlockShape(structure) {
+    return Array.from(structure || []).map(item => ({
+      marker: String(item?.marker || "")
+    }));
+  }
+
+  function hydrationIframeSourceFingerprints(structure) {
+    return Array.from(structure || []).flatMap(item =>
+      Array.from(item?.iframeSourceFingerprints || []).map(value => String(value || ""))
+    );
+  }
+
+  function sameFingerprintMultiset(first, second) {
+    const left = Array.from(first || []).map(String).sort();
+    const right = Array.from(second || []).map(String).sort();
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+
+  function findHydrationA2DuringVerifiedShare(entries, snapshot, transition = {}) {
+    const identityMatch = findHydrationTurnIdentity(entries, snapshot);
+    if (identityMatch.status !== "found") return identityMatch;
+    const entry = identityMatch.entry;
+    const currentProof = hydrationTurnProof(entry);
+    const exactFingerprint = hydrationTurnFingerprintFromProof(currentProof) === snapshot?.fingerprint;
+    if (!currentProof || !snapshot?.coreFingerprint ||
+        hydrationTurnCoreFingerprintFromProof(currentProof) !== snapshot.coreFingerprint) {
+      return { status: "conflict", reason: "virtualized A2 authored content changed during Share" };
+    }
+
+    const expectedStructure = Array.from(snapshot.richAppStructure || []);
+    const currentStructure = Array.from(currentProof.richAppStructure || []);
+    const expectedShape = hydrationRichAppBlockShape(expectedStructure);
+    if (!expectedStructure.length ||
+        expectedStructure.some(item => Number(item?.iframeCount || 0) !== Array.from(item?.iframeSourceFingerprints || []).length) ||
+        JSON.stringify(hydrationRichAppBlockShape(currentStructure)) !== JSON.stringify(expectedShape)) {
+      return { status: "conflict", reason: "virtualized A2 app-block wrapper changed during Share" };
+    }
+
+    const expectedSources = hydrationIframeSourceFingerprints(expectedStructure);
+    const currentSources = hydrationIframeSourceFingerprints(currentStructure);
+    if (!expectedSources.length) {
+      return { status: "conflict", reason: "virtualized A2 iframe relocation proof is missing" };
+    }
+
+    if (transition.mode === "surface" || transition.mode === "copy-success-surface") {
+      const surface = transition.surface || null;
+      const surfaceVisible = surface ? shareSurfaceVisibilityDetails(surface).visible : false;
+      const verifiedCopySuccessState = transition.mode === "copy-success-surface" &&
+        transition.copyClicked === true &&
+        transition.copySignalObserved === true &&
+        copySuccessEntries(surface, null).length > 0;
+      if (transition.shareKind !== "response" || !surface || surface.isConnected === false ||
+          entry.node.contains?.(surface) ||
+          (classifyShareSurface(surface) !== "final" && !verifiedCopySuccessState) ||
+          !surfaceVisible) {
+        return { status: "conflict", reason: VERIFIED_RESPONSE_SHARE_SURFACE_MISSING };
+      }
+      const surfaceStructure = hydrationRichAppStructure(surface);
+      const surfaceSources = hydrationIframeSourceFingerprints(surfaceStructure);
+      if (exactFingerprint) {
+        if (surfaceSources.length !== 0) {
+          return { status: "conflict", reason: RESPONSE_SHARE_IFRAME_DUPLICATED };
+        }
+        return { status: "found", entry };
+      }
+      if (JSON.stringify(hydrationRichAppBlockShape(surfaceStructure)) !== JSON.stringify(expectedShape) ||
+          currentSources.length !== 0 || !sameFingerprintMultiset(surfaceSources, expectedSources)) {
+        return { status: "conflict", reason: RESPONSE_SHARE_IFRAME_RELOCATION_MISMATCH };
+      }
+      return { status: "found", entry, shareRelocationVerified: true };
+    }
+
+    if (transition.mode === "verified") {
+      if (currentSources.length !== 0 && !sameFingerprintMultiset(currentSources, expectedSources)) {
+        return { status: "conflict", reason: "verified A2 iframe state changed after Share" };
+      }
+      return { status: "found", entry };
+    }
+
+    return { status: "conflict", reason: "virtualized A2 Share transition proof is missing" };
+  }
+
+  function resolveConversationScrollContainer(currentTurn, { root = document } = {}) {
+    if (!currentTurn) return null;
+    let candidate = currentTurn.parentElement || null;
+    while (candidate) {
+      const clientHeight = Number(candidate.clientHeight || 0);
+      const scrollHeight = Number(candidate.scrollHeight || 0);
+      if (clientHeight > 0 && scrollHeight > clientHeight + 2) {
+        let overflowY = "";
+        try {
+          overflowY = String(candidate.ownerDocument?.defaultView?.getComputedStyle?.(candidate)?.overflowY || "").toLowerCase();
+        } catch {}
+        if (/^(?:auto|scroll|overlay)$/.test(overflowY)) {
+          return candidate;
+        }
+      }
+      candidate = candidate.parentElement || null;
+    }
+    const doc = root?.nodeType === 9 ? root : currentTurn.ownerDocument || document;
+    return doc?.scrollingElement || doc?.documentElement || document.scrollingElement || document.documentElement || null;
+  }
+
+  function setConversationScrollTop(container, top) {
+    if (!container || !Number.isFinite(Number(top))) return false;
+    const target = Math.max(0, Number(top));
+    let applied = false;
+    try {
+      if (typeof container.scrollTo === "function") {
+        container.scrollTo({ top: target, left: Number(container.scrollLeft || 0), behavior: "auto" });
+        applied = true;
+      }
+    } catch {}
+    try {
+      if (Math.abs(Number(container.scrollTop || 0) - target) > 1 || !applied) {
+        container.scrollTop = target;
+      }
+      applied = true;
+    } catch {}
+    const actual = Number(container.scrollTop);
+    return applied && Number.isFinite(actual) && Math.abs(actual - target) <= 3;
+  }
+
+  function waitForHydrationPoll(delayMs) {
+    return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(delayMs) || 0)));
+  }
+
+  function hydrationAppRuntimeReadiness(node, expectedRichBlockCount) {
+    const blocks = nodesIncludingRoot(node, '[data-app-block-preview="true"]');
+    if (!expectedRichBlockCount || blocks.length !== expectedRichBlockCount) {
+      return {
+        status: "conflict",
+        reason: "Visualize app block count changed before hydration"
+      };
+    }
+    for (const block of blocks) {
+      const iframes = Array.from(block.querySelectorAll?.("iframe") || []);
+      if (iframes.length === 0) return { status: "missing" };
+      if (iframes.length !== 1) {
+        return {
+          status: "conflict",
+          reason: "Visualize app runtime iframe is duplicated before hydration"
+        };
+      }
+      const iframeUrl = String(iframes[0].getAttribute?.("src") || "").trim();
+      if (!iframeUrl) return { status: "missing" };
+      if (!isStrictRichAppRuntimeIframeUrl(iframeUrl)) {
+        return {
+          status: "conflict",
+          reason: "Visualize app runtime iframe URL is not allowed before hydration"
+        };
+      }
+    }
+    return {
+      status: "found",
+      structureFingerprint: stableTurnFingerprint(JSON.stringify(hydrationRichAppStructure(node)))
+    };
+  }
+
+  async function waitForStableHydrationClickWindow({
+    root,
+    a1Node,
+    q2Node,
+    a2Node,
+    clickWindowProof,
+    scrollContainer,
+    resolveCurrentScrollContainer,
+    routeKey,
+    expectedRichBlockCount,
+    timeoutMs,
+    pollMs,
+    runtimeGuard,
+    nowFn = Date.now,
+    waitForHydrationPollFn = waitForHydrationPoll
+  }) {
+    const deadline = nowFn() + Math.max(40, Number(timeoutMs) || 0);
+    let stableKey = "";
+    let readyRuntimeStructureFingerprint = "";
+    while (nowFn() <= deadline) {
+      if (conversationRouteKey() !== routeKey) {
+        return { status: "conflict", reason: "conversation route changed before Visualize hydration" };
+      }
+      if (runtimeGuard?.isAborted?.()) {
+        return { status: "conflict", reason: "extension runtime changed before Visualize hydration" };
+      }
+      if (scrollContainer?.isConnected === false) {
+        return { status: "conflict", reason: "conversation scroll container changed before Visualize hydration" };
+      }
+      const entries = getVerifiedConversationTurnEntries(root);
+      const a1Matches = a1Node ? entries.filter(entry => entry.node === a1Node) : [];
+      const q2Matches = entries.filter(entry => entry.node === q2Node);
+      const a2Matches = entries.filter(entry => entry.node === a2Node);
+      if ((a1Node && a1Matches.length !== 1) || q2Matches.length !== 1 || a2Matches.length !== 1 ||
+          (a1Node && (a1Matches[0].ambiguous || a1Matches[0].role !== "assistant")) ||
+          q2Matches[0].ambiguous || q2Matches[0].role !== "user" ||
+          a2Matches[0].ambiguous || a2Matches[0].role !== "assistant") {
+        return { status: "conflict", reason: "Visualize click window changed before hydration" };
+      }
+      if (typeof resolveCurrentScrollContainer === "function" &&
+          resolveCurrentScrollContainer(a2Matches[0]) !== scrollContainer) {
+        return { status: "conflict", reason: "conversation scroll container changed before Visualize hydration" };
+      }
+      const q2Index = entries.indexOf(q2Matches[0]);
+      const a2Index = entries.indexOf(a2Matches[0]);
+      if (!(q2Index < a2Index) || entries.slice(q2Index + 1, a2Index)
+        .some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant") ||
+        !isExplicitVisualizeRequestNode(q2Node) ||
+        !isPreviousAnswerVisualizationRequestText(visualizeRequestNodeToPlainText(q2Node)) ||
+        !isVisualizeRequestForAssistant(q2Node, a2Node)) {
+        return { status: "conflict", reason: "Visualize Q2/A2 binding changed before hydration" };
+      }
+      const roleBearingEntry = entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant";
+      const a1Index = a1Node ? entries.indexOf(a1Matches[0]) : -1;
+      const topologyChanged = a1Node
+        ? !(a1Index < q2Index) || entries.slice(a1Index + 1, q2Index).some(roleBearingEntry)
+        : entries.slice(0, q2Index).some(roleBearingEntry);
+      const proofIdentityKeys = [
+        clickWindowProof?.a1?.key,
+        clickWindowProof?.q2?.key,
+        clickWindowProof?.a2?.key
+      ].filter(Boolean);
+      const duplicateProofIdentity = proofIdentityKeys.some(key =>
+        entries.filter(entry => verifiedTurnIdentity(entry) === key).length > 1
+      );
+      if (topologyChanged || duplicateProofIdentity) {
+        return { status: "conflict", reason: "Visualize click window topology changed before hydration" };
+      }
+      const currentA2Proof = hydrationTurnProof(a2Matches[0]);
+      const currentA2Shape = hydrationRichAppBlockShape(currentA2Proof?.richAppStructure || []);
+      if (!clickWindowProof?.q2 || !clickWindowProof?.a2 ||
+          verifiedTurnIdentity(q2Matches[0]) !== clickWindowProof.q2.key ||
+          hydrationTurnFingerprint(q2Matches[0]) !== clickWindowProof.q2.fingerprint ||
+          verifiedTurnIdentity(a2Matches[0]) !== clickWindowProof.a2.key ||
+          hydrationTurnCoreFingerprintFromProof(currentA2Proof) !== clickWindowProof.a2.coreFingerprint ||
+          JSON.stringify(currentA2Shape) !== JSON.stringify(clickWindowProof.a2.richAppBlockShape) ||
+          (a1Node && (
+            !clickWindowProof.a1 ||
+            verifiedTurnIdentity(a1Matches[0]) !== clickWindowProof.a1.key ||
+            hydrationTurnFingerprint(a1Matches[0]) !== clickWindowProof.a1.fingerprint
+          ))) {
+        return { status: "conflict", reason: "Visualize click window proof changed before hydration" };
+      }
+      const readiness = hydrationAppRuntimeReadiness(a2Node, expectedRichBlockCount);
+      if (readiness.status === "conflict") return readiness;
+      if (readiness.status === "found") {
+        if (readyRuntimeStructureFingerprint &&
+            readyRuntimeStructureFingerprint !== readiness.structureFingerprint) {
+          return { status: "conflict", reason: "Visualize app runtime changed while becoming ready" };
+        }
+        if (!readyRuntimeStructureFingerprint) {
+          readyRuntimeStructureFingerprint = readiness.structureFingerprint;
+        }
+        const currentKey = [
+          readiness.structureFingerprint,
+          Number(scrollContainer.scrollTop || 0),
+          Number(scrollContainer.scrollHeight || 0),
+          Number(scrollContainer.clientHeight || 0)
+        ].join(":");
+        if (currentKey === stableKey) {
+          return {
+            status: "found",
+            entries,
+            a1: a1Matches[0] || null,
+            q2: q2Matches[0],
+            a2: a2Matches[0]
+          };
+        }
+        stableKey = currentKey;
+      } else {
+        if (readyRuntimeStructureFingerprint) {
+          return { status: "conflict", reason: "Visualize app runtime changed while becoming ready" };
+        }
+        stableKey = "";
+      }
+      if (nowFn() >= deadline) break;
+      await waitForHydrationPollFn(pollMs);
+    }
+    return {
+      status: "missing",
+      reason: "Visualize app runtime did not become stable before hydration"
+    };
+  }
+
+  function mountedPreviousQuestionForAnchor(entries, a1Snapshot, frozenSnapshots = []) {
+    const a1Match = findHydrationTurn(entries, a1Snapshot);
+    if (a1Match.status !== "found") return a1Match;
+    const a1Index = entries.indexOf(a1Match.entry);
+    const q1 = [...entries.slice(0, a1Index)].reverse()
+      .find(entry => !entry.ambiguous && entry.role === "user");
+    if (!q1) return { status: "missing" };
+    const q1Index = entries.indexOf(q1);
+    const between = entries.slice(q1Index + 1, a1Index);
+    if (between.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return { status: "conflict", reason: "virtualized Q1/A1 correspondence is ambiguous" };
+    }
+    const q1Snapshot = captureHydrationTurn(q1);
+    const frozenKeys = new Set(
+      [a1Snapshot, ...frozenSnapshots]
+        .map(snapshot => String(snapshot?.key || ""))
+        .filter(Boolean)
+    );
+    if (q1Snapshot?.key && frozenKeys.has(q1Snapshot.key)) {
+      return { status: "conflict", reason: "virtualized Q1 reuses a frozen turn identity" };
+    }
+    const q1IdentityMatches = q1Snapshot
+      ? entries.filter(entry => verifiedTurnIdentity(entry) === q1Snapshot.key)
+      : [];
+    if (q1IdentityMatches.length !== 1) {
+      return { status: "conflict", reason: "virtualized Q1 has duplicate or missing identity" };
+    }
+    const questionText = questionNodeToPlainText(q1.node);
+    if (!q1Snapshot || !questionText) {
+      return { status: "conflict", reason: "virtualized Q1 could not be verified" };
+    }
+    return { status: "found", q1Snapshot, questionText };
+  }
+
+  function mountedPreviousAnswerForRequestAnchor(entries, q2Snapshot, frozenSnapshots = []) {
+    const q2Match = findHydrationTurn(entries, q2Snapshot);
+    if (q2Match.status !== "found") return q2Match;
+    const q2Index = entries.indexOf(q2Match.entry);
+    const predecessor = [...entries.slice(0, q2Index)].reverse()
+      .find(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant");
+    if (!predecessor) return { status: "missing" };
+    if (predecessor.ambiguous || predecessor.role !== "assistant") {
+      return { status: "conflict", reason: "virtualized A1/Q2 correspondence is ambiguous" };
+    }
+    const a1Index = entries.indexOf(predecessor);
+    const between = entries.slice(a1Index + 1, q2Index);
+    if (between.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return { status: "conflict", reason: "virtualized A1/Q2 correspondence is ambiguous" };
+    }
+    const a1Snapshot = captureHydrationTurn(predecessor);
+    const frozenKeys = new Set(
+      [q2Snapshot, ...frozenSnapshots]
+        .map(snapshot => String(snapshot?.key || ""))
+        .filter(Boolean)
+    );
+    if (a1Snapshot?.key && frozenKeys.has(a1Snapshot.key)) {
+      return { status: "conflict", reason: "virtualized A1 reuses a frozen turn identity" };
+    }
+    const a1IdentityMatches = a1Snapshot
+      ? entries.filter(entry => verifiedTurnIdentity(entry) === a1Snapshot.key)
+      : [];
+    if (a1IdentityMatches.length !== 1) {
+      return { status: "conflict", reason: "virtualized A1 has duplicate or missing identity" };
+    }
+
+    let answerNode = null;
+    try {
+      answerNode = predecessor.node.cloneNode?.(true) || null;
+    } catch {}
+    if (!a1Snapshot || !answerNode || answerNode === predecessor.node) {
+      return { status: "conflict", reason: "virtualized A1 could not be frozen independently" };
+    }
+    const answerEntry = { role: "assistant", node: answerNode, ambiguous: false };
+    const answerFingerprint = hydrationTurnFingerprint(answerEntry);
+    const answerText = hydrationTurnText(answerEntry);
+    if (!answerFingerprint || answerFingerprint !== a1Snapshot.fingerprint || !answerText) {
+      return { status: "conflict", reason: "virtualized A1 frozen payload does not match its turn proof" };
+    }
+    return { status: "found", a1Snapshot, answerNode, answerText, answerFingerprint };
+  }
+
+  function validateRestoredVisualizeWindow(
+    entries,
+    anchors,
+    expectedRichBlockCount,
+    { requireA1 = true, a2ShareTransition = null } = {}
+  ) {
+    const a1Match = anchors?.a1
+      ? findHydrationTurn(entries, anchors.a1)
+      : { status: "missing" };
+    const q2Match = findHydrationTurn(entries, anchors.q2);
+    const a2Match = a2ShareTransition
+      ? findHydrationA2DuringVerifiedShare(entries, anchors.a2, a2ShareTransition)
+      : findHydrationTurn(entries, anchors.a2);
+    const matches = [a1Match, q2Match, a2Match];
+    const conflict = matches.find(match => match.status === "conflict");
+    if (conflict) return conflict;
+    if (q2Match.status !== "found" || a2Match.status !== "found" ||
+        (requireA1 && a1Match.status !== "found")) {
+      return { status: "missing" };
+    }
+
+    const q2Index = entries.indexOf(q2Match.entry);
+    const a2Index = entries.indexOf(a2Match.entry);
+    if (!(q2Index < a2Index)) {
+      return { status: "conflict", reason: "restored Visualize turn order changed" };
+    }
+    const betweenQ2AndA2 = entries.slice(q2Index + 1, a2Index);
+    if (betweenQ2AndA2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return { status: "conflict", reason: "restored Visualize turn correspondence is ambiguous" };
+    }
+    if (a1Match.status === "found") {
+      const a1Index = entries.indexOf(a1Match.entry);
+      const betweenA1AndQ2 = entries.slice(a1Index + 1, q2Index);
+      if (!(a1Index < q2Index) || betweenA1AndQ2
+        .some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+        return { status: "conflict", reason: "restored Visualize turn correspondence is ambiguous" };
+      }
+    } else if (entries.slice(0, q2Index)
+      .some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return { status: "conflict", reason: "restored Visualize predecessor could not be verified" };
+    }
+
+    const requestText = visualizeRequestNodeToPlainText(q2Match.entry.node);
+    if (!isExplicitVisualizeRequestNode(q2Match.entry.node) ||
+        !isPreviousAnswerVisualizationRequestText(requestText) ||
+        !isVisualizeRequestForAssistant(q2Match.entry.node, a2Match.entry.node)) {
+      return { status: "conflict", reason: "restored Visualize request marker changed" };
+    }
+    if (collectRichAppBlockCandidates(a2Match.entry.node).length !== expectedRichBlockCount) {
+      return { status: "conflict", reason: "restored Visualize app evidence changed" };
+    }
+    return {
+      status: "found",
+      a1: a1Match.status === "found" ? a1Match.entry : null,
+      q2: q2Match.entry,
+      a2: a2Match.entry,
+      requestText,
+      a2ShareRelocationVerified: a2Match.shareRelocationVerified === true
+    };
+  }
+
+  function revalidateHydratedVisualizeContext(
+    currentAssistantNode,
+    visualizeContext,
+    { root = document, a2ShareTransition = null } = {}
+  ) {
+    if (!visualizeContext?.hydratedFromVirtualizedTurns) return { ok: true };
+    const proof = visualizeContext.hydrationVerification || null;
+    if (!proof?.routeKey || !proof?.anchors) {
+      return { ok: false, reason: "hydrated Visualize verification evidence is missing" };
+    }
+    const proofSnapshots = [
+      proof.anchors.q1,
+      proof.anchors.a1,
+      proof.anchors.q2,
+      proof.anchors.a2
+    ];
+    const proofRoles = ["user", "assistant", "user", "assistant"];
+    if (proofSnapshots.some((snapshot, index) => !snapshot?.key || snapshot.role !== proofRoles[index]) ||
+        new Set(proofSnapshots.map(snapshot => snapshot.key)).size !== proofSnapshots.length) {
+      return { ok: false, reason: "hydrated Visualize chronology proof is invalid" };
+    }
+    if (!proof.questionTextFingerprint || !proof.answerTextFingerprint) {
+      return { ok: false, reason: "hydrated Visualize payload proof is missing" };
+    }
+    if (proof.requireA1AtRestoredWindow === false &&
+        (!proof.answerNodeFingerprint || proof.answerNodeFingerprint !== proof.anchors.a1.fingerprint)) {
+      return { ok: false, reason: "hydrated Visualize frozen A1 proof is inconsistent" };
+    }
+    if (conversationRouteKey() !== proof.routeKey) {
+      return { ok: false, reason: "conversation route changed after Visualize hydration" };
+    }
+    if (proof.questionTextFingerprint &&
+        stableTurnFingerprint(visualizeContext.questionText) !== proof.questionTextFingerprint) {
+      return { ok: false, reason: "hydrated Visualize Q1 payload changed before Share" };
+    }
+    if (proof.answerTextFingerprint &&
+        stableTurnFingerprint(visualizeContext.answerText) !== proof.answerTextFingerprint) {
+      return { ok: false, reason: "hydrated Visualize A1 payload changed before Share" };
+    }
+    if (proof.answerNodeFingerprint) {
+      const answerNodeFingerprint = hydrationTurnFingerprint({
+        role: "assistant",
+        node: visualizeContext.answerNode,
+        ambiguous: false
+      });
+      if (!answerNodeFingerprint || answerNodeFingerprint !== proof.answerNodeFingerprint) {
+        return { ok: false, reason: "hydrated Visualize frozen A1 payload changed before Share" };
+      }
+    }
+    const currentEntries = getVerifiedConversationTurnEntries(root);
+    const hydrationRecovery = visualizeContext.hydrationRecovery || null;
+    if (typeof hydrationRecovery?.resolveCurrentScrollContainer === "function") {
+      const exactCurrentA2Entries = currentEntries.filter(entry => entry.node === currentAssistantNode);
+      if (exactCurrentA2Entries.length === 1 &&
+          hydrationRecovery.resolveCurrentScrollContainer(exactCurrentA2Entries[0]) !== hydrationRecovery.scrollContainer) {
+        return { ok: false, reason: "conversation scroll container changed after Visualize hydration" };
+      }
+    }
+    const verified = validateRestoredVisualizeWindow(
+      currentEntries,
+      proof.anchors,
+      proof.expectedRichBlockCount,
+      {
+        requireA1: proof.requireA1AtRestoredWindow !== false,
+        a2ShareTransition
+      }
+    );
+    if (verified.status !== "found") {
+      let retryableMissingQ2 = false;
+      let retryableMissingHydrationWindow = false;
+      if (verified.status === "missing" && !a2ShareTransition) {
+        const requireA1 = proof.requireA1AtRestoredWindow !== false;
+        const a1Match = findHydrationTurn(currentEntries, proof.anchors.a1);
+        const q2Match = findHydrationTurn(currentEntries, proof.anchors.q2);
+        const a2Match = findHydrationTurn(currentEntries, proof.anchors.a2);
+        const a2Index = a2Match.status === "found" ? currentEntries.indexOf(a2Match.entry) : -1;
+        const a1Index = a1Match.status === "found" ? currentEntries.indexOf(a1Match.entry) : -1;
+        const q2Index = q2Match.status === "found" ? currentEntries.indexOf(q2Match.entry) : -1;
+        const roleBearingEntry = entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant";
+        const actualPredecessors = a2Index >= 0
+          ? currentEntries.slice(0, a2Index).filter(roleBearingEntry)
+          : [];
+        const expectedPredecessors = [
+          a1Match.status === "found" ? a1Match.entry : null,
+          q2Match.status === "found" ? q2Match.entry : null
+        ].filter(Boolean);
+        const predecessorWindowExact = actualPredecessors.length === expectedPredecessors.length &&
+          actualPredecessors.every((entry, index) => entry === expectedPredecessors[index]);
+        const foundOrderValid = (a1Index < 0 || a1Index < a2Index) &&
+          (q2Index < 0 || q2Index < a2Index) &&
+          (a1Index < 0 || q2Index < 0 || a1Index < q2Index);
+        const foundQ2BindingValid = q2Match.status !== "found" || (
+          isExplicitVisualizeRequestNode(q2Match.entry.node) &&
+          isPreviousAnswerVisualizationRequestText(visualizeRequestNodeToPlainText(q2Match.entry.node)) &&
+          isVisualizeRequestForAssistant(q2Match.entry.node, a2Match.entry?.node)
+        );
+        const requiredAnchorMissing = q2Match.status === "missing" ||
+          (requireA1 && a1Match.status === "missing");
+        retryableMissingHydrationWindow = requiredAnchorMissing &&
+          a2Match.status === "found" &&
+          a2Match.entry.node === visualizeContext.visualizeAnswerNode &&
+          a2Match.entry.node === currentAssistantNode &&
+          a2Index >= 0 &&
+          predecessorWindowExact &&
+          foundOrderValid &&
+          foundQ2BindingValid;
+        retryableMissingQ2 = retryableMissingHydrationWindow &&
+          proof.requireA1AtRestoredWindow === false &&
+          q2Match.status === "missing";
+      }
+      return {
+        ok: false,
+        retryableMissingQ2,
+        retryableMissingHydrationWindow,
+        reason: verified.reason || "hydrated Visualize turn context changed before Share"
+      };
+    }
+    if (verified.a2.node !== visualizeContext.visualizeAnswerNode ||
+        verified.a2.node !== currentAssistantNode) {
+      return { ok: false, reason: "hydrated Visualize turn nodes remounted before Share" };
+    }
+    if (verified.q2.node !== visualizeContext.visualizeRequestNode) {
+      return {
+        ok: false,
+        verifiedHydrationRemount: true,
+        reason: "hydrated Visualize Q2 remounted before Share"
+      };
+    }
+    if (proof.requireA1AtRestoredWindow !== false && verified.a1?.node !== visualizeContext.answerNode) {
+      return {
+        ok: false,
+        verifiedHydrationRemount: true,
+        reason: "hydrated Visualize A1 remounted before Share"
+      };
+    }
+    return {
+      ok: true,
+      a2ShareRelocationVerified: verified.a2ShareRelocationVerified === true
+    };
+  }
+
+  async function restoreVisualizeHydrationWindow({
+    root,
+    scrollContainer,
+    scrollSnapshot,
+    routeKey,
+    anchors,
+    expectedRichBlockCount,
+    requireA1AtRestoredWindow = true,
+    expectedPinnedA2Node = null,
+    resolveCurrentScrollContainer = null,
+    followingNavigationAnchor = null,
+    maxFollowingAnchorCorrectionPx = 0,
+    restoreProbeStepPx,
+    timeoutMs,
+    pollMs,
+    runtimeGuard,
+    nowFn = Date.now,
+    waitForHydrationPollFn = waitForHydrationPoll
+  }) {
+    if (conversationRouteKey() !== routeKey) {
+      return { status: "conflict", reason: "conversation route changed during Visualize hydration" };
+    }
+    const runtimeAbortedBeforeRestore = runtimeGuard?.isAborted?.() === true;
+    const startedAt = nowFn();
+    const deadline = startedAt + Math.max(40, Number(timeoutMs) || 0);
+    let bottomOffsetApplied = false;
+    let expectedScrollTop = scrollSnapshot.scrollTop;
+    let restoreProbeAttempted = false;
+    let restoreProbeActive = false;
+    let sawRestoredTarget = false;
+    let settledGeometryKey = "";
+    let settledProbeGeometryKey = "";
+    const findFollowingNavigationAnchor = entries => {
+      if (!followingNavigationAnchor) return { status: "missing" };
+      const frozenKey = followingNavigationAnchor.snapshot?.key;
+      const primaryIdentityMatches = entries.filter(entry => verifiedTurnIdentity(entry) === frozenKey);
+      const containerIdentityMatches = entries.filter(entry => verifiedTurnContainerIdentity(entry) === frozenKey);
+      if (!containerIdentityMatches.length) {
+        if (!primaryIdentityMatches.length) return { status: "missing" };
+        return {
+          status: "conflict",
+          reason: "following Visualize turn navigation anchor changed during hydration"
+        };
+      }
+      if (containerIdentityMatches.length !== 1 || primaryIdentityMatches.length !== 1 ||
+          primaryIdentityMatches[0] !== containerIdentityMatches[0]) {
+        return {
+          status: "conflict",
+          reason: "following Visualize turn navigation anchor changed during hydration"
+        };
+      }
+      const entry = containerIdentityMatches[0];
+      if (entry.ambiguous || entry.role !== followingNavigationAnchor.snapshot.role ||
+          hydrationTurnFingerprint(entry) !== followingNavigationAnchor.snapshot.fingerprint) {
+        return {
+          status: "conflict",
+          reason: "following Visualize turn navigation anchor changed during hydration"
+        };
+      }
+      return { status: "found", entry };
+    };
+    const validatePinnedRecoveryBoundary = entries => {
+      if (!expectedPinnedA2Node && !followingNavigationAnchor &&
+          typeof resolveCurrentScrollContainer !== "function") return null;
+      const exactA2Entries = expectedPinnedA2Node
+        ? entries.filter(entry => entry.node === expectedPinnedA2Node)
+        : [];
+      if (expectedPinnedA2Node && exactA2Entries.length !== 1) {
+        return { status: "conflict", reason: "hydrated Visualize A2 changed during recovery" };
+      }
+      const navigationMatch = findFollowingNavigationAnchor(entries);
+      if (navigationMatch.status === "conflict") return navigationMatch;
+      if (typeof resolveCurrentScrollContainer === "function") {
+        let currentScrollContainer = null;
+        try {
+          const referenceEntry = exactA2Entries[0] ||
+            (navigationMatch.status === "found" ? navigationMatch.entry : null) ||
+            entries.find(entry => !entry.ambiguous && (entry.role === "user" || entry.role === "assistant")) ||
+            null;
+          currentScrollContainer = resolveCurrentScrollContainer(referenceEntry);
+        } catch {}
+        if (currentScrollContainer !== scrollContainer) {
+          return { status: "conflict", reason: "conversation scroll container changed during Visualize hydration" };
+        }
+      }
+      return null;
+    };
+    const followingAnchorCorrection = entries => {
+      if (!followingNavigationAnchor) return { status: "missing" };
+      const match = findFollowingNavigationAnchor(entries);
+      if (match.status === "missing") return match;
+      if (match.status === "conflict") return match;
+      let currentTurnTop = NaN;
+      let currentScrollerTop = NaN;
+      try {
+        currentTurnTop = Number(match.entry.turn?.getBoundingClientRect?.().top);
+        currentScrollerTop = Number(scrollContainer.getBoundingClientRect?.().top);
+      } catch {}
+      const currentRelativeTop = currentTurnTop - currentScrollerTop;
+      const frozenRelativeTop = Number(followingNavigationAnchor.relativeTop);
+      const currentScrollTop = Number(scrollContainer.scrollTop || 0);
+      const correctedScrollTop = currentScrollTop + currentRelativeTop - frozenRelativeTop;
+      const correctionDistance = currentScrollTop - correctedScrollTop;
+      const correctionLimit = Math.max(1, Number(maxFollowingAnchorCorrectionPx) || 0);
+      if (!Number.isFinite(currentRelativeTop) || !Number.isFinite(frozenRelativeTop) ||
+          !Number.isFinite(correctedScrollTop) || correctedScrollTop < 0 ||
+          !Number.isFinite(correctionDistance)) {
+        return {
+          status: "conflict",
+          reason: "following Visualize turn navigation geometry could not be safely restored"
+        };
+      }
+      if (Math.abs(correctionDistance) <= 1) return { status: "aligned" };
+      if (correctionDistance < 0 || correctionDistance > correctionLimit) {
+        return {
+          status: "conflict",
+          reason: "following Visualize turn navigation geometry could not be safely restored"
+        };
+      }
+      return { status: "found", correctedScrollTop };
+    };
+    const currentBottomOffsetTop = () => Math.max(0,
+      Number(scrollContainer.scrollHeight || 0) -
+      Number(scrollContainer.clientHeight || 0) -
+      scrollSnapshot.bottomOffset
+    );
+    const restoreLogicalPosition = () => {
+      const logicalTop = bottomOffsetApplied
+        ? currentBottomOffsetTop()
+        : scrollSnapshot.scrollTop;
+      if (!Number.isFinite(logicalTop) || !setConversationScrollTop(scrollContainer, logicalTop)) return false;
+      expectedScrollTop = logicalTop;
+      restoreProbeActive = false;
+      settledGeometryKey = "";
+      settledProbeGeometryKey = "";
+      return true;
+    };
+    const applyBottomOffset = () => {
+      const bottomTop = currentBottomOffsetTop();
+      if (!Number.isFinite(bottomTop) || !setConversationScrollTop(scrollContainer, bottomTop)) return false;
+      expectedScrollTop = bottomTop;
+      bottomOffsetApplied = true;
+      restoreProbeActive = false;
+      settledGeometryKey = "";
+      settledProbeGeometryKey = "";
+      return true;
+    };
+    if (scrollContainer?.isConnected === false) {
+      return { status: "conflict", reason: "conversation scroll container changed during Visualize hydration" };
+    }
+    const initialEntries = getVerifiedConversationTurnEntries(root);
+    const initialPinnedBoundary = validatePinnedRecoveryBoundary(initialEntries);
+    if (initialPinnedBoundary) return initialPinnedBoundary;
+    if (!setConversationScrollTop(scrollContainer, scrollSnapshot.scrollTop) && !applyBottomOffset()) {
+      return { status: "conflict", reason: "conversation scroll position could not be restored" };
+    }
+    // Even a stale content-script generation must undo the local scroll it
+    // initiated on the same route. Stop immediately after that cleanup; no
+    // runtime-dependent work or external boundary may continue.
+    if (runtimeAbortedBeforeRestore) {
+      return { status: "conflict", reason: "extension runtime changed during Visualize hydration" };
+    }
+    while (nowFn() <= deadline) {
+      if (conversationRouteKey() !== routeKey) {
+        return { status: "conflict", reason: "conversation route changed during Visualize hydration" };
+      }
+      if (scrollContainer?.isConnected === false) {
+        return { status: "conflict", reason: "conversation scroll container changed during Visualize hydration" };
+      }
+      const entries = getVerifiedConversationTurnEntries(root);
+      const pinnedBoundary = validatePinnedRecoveryBoundary(entries);
+      if (pinnedBoundary) return pinnedBoundary;
+      if (runtimeGuard?.isAborted?.()) {
+        if (restoreProbeActive) restoreLogicalPosition();
+        return { status: "conflict", reason: "extension runtime changed during Visualize hydration" };
+      }
+      if (bottomOffsetApplied && !restoreProbeActive) {
+        const currentBottomTop = currentBottomOffsetTop();
+        if (!Number.isFinite(currentBottomTop)) {
+          return { status: "conflict", reason: "conversation scroll position could not be restored" };
+        }
+        if (Math.abs(currentBottomTop - expectedScrollTop) > 3 && !applyBottomOffset()) {
+          return { status: "conflict", reason: "conversation scroll position could not be restored" };
+        }
+      }
+      const restored = validateRestoredVisualizeWindow(
+        entries,
+        anchors,
+        expectedRichBlockCount,
+        { requireA1: requireA1AtRestoredWindow }
+      );
+      const atExpectedTop = Math.abs(Number(scrollContainer.scrollTop || 0) - expectedScrollTop) <= 3;
+      if (restored.status === "found") {
+        sawRestoredTarget = true;
+        if (!atExpectedTop) {
+          if (restoreProbeActive) {
+            const probeGeometryKey = [
+              Number(scrollContainer.scrollTop || 0),
+              Number(scrollContainer.scrollHeight || 0),
+              Number(scrollContainer.clientHeight || 0)
+            ].join(":");
+            if (settledProbeGeometryKey === probeGeometryKey) {
+              if (!restoreLogicalPosition()) {
+                return { status: "conflict", reason: "conversation scroll position could not be restored" };
+              }
+            } else {
+              settledProbeGeometryKey = probeGeometryKey;
+            }
+          } else if (!restoreLogicalPosition()) {
+            return { status: "conflict", reason: "conversation scroll position could not be restored" };
+          }
+        } else {
+          const geometryKey = [
+            Number(scrollContainer.scrollTop || 0),
+            Number(scrollContainer.scrollHeight || 0),
+            Number(scrollContainer.clientHeight || 0),
+            expectedScrollTop
+          ].join(":");
+          if (settledGeometryKey === geometryKey) return restored;
+          settledGeometryKey = geometryKey;
+        }
+      } else {
+        settledGeometryKey = "";
+        settledProbeGeometryKey = "";
+      }
+      if (restored.status === "conflict") {
+        if (restoreProbeActive) restoreLogicalPosition();
+        return restored;
+      }
+
+      const navigationAnchorAtAbsoluteRestore = !bottomOffsetApplied && restored.status === "missing"
+        ? findFollowingNavigationAnchor(entries)
+        : { status: "missing" };
+      if (navigationAnchorAtAbsoluteRestore.status === "conflict") {
+        return navigationAnchorAtAbsoluteRestore;
+      }
+      const blindProbeDelayElapsed = nowFn() - startedAt >= Math.max(20, (deadline - startedAt) / 2);
+      if (!bottomOffsetApplied && (
+        navigationAnchorAtAbsoluteRestore.status === "found" ||
+        blindProbeDelayElapsed
+      )) {
+        if (!applyBottomOffset()) {
+          return { status: "conflict", reason: "conversation scroll position could not be restored" };
+        }
+      } else if (bottomOffsetApplied && restored.status === "missing" && !restoreProbeAttempted) {
+        const anchoredCorrection = followingAnchorCorrection(entries);
+        if (anchoredCorrection.status === "conflict") return anchoredCorrection;
+        if (anchoredCorrection.status === "found" ||
+            (anchoredCorrection.status === "missing" && blindProbeDelayElapsed)) {
+          restoreProbeAttempted = true;
+          let probeTop = null;
+          if (anchoredCorrection.status === "found") {
+            probeTop = anchoredCorrection.correctedScrollTop;
+          } else {
+            const clientHeight = Math.max(1, Number(scrollContainer.clientHeight || 0));
+            const requestedProbeStep = Math.max(1, Number(restoreProbeStepPx) || clientHeight * 0.85);
+            const probeStep = Math.min(clientHeight, requestedProbeStep);
+            probeTop = Math.max(0, Number(scrollContainer.scrollTop || 0) - probeStep);
+          }
+          const currentTop = Number(scrollContainer.scrollTop || 0);
+          if (Number.isFinite(probeTop) && probeTop < currentTop &&
+              setConversationScrollTop(scrollContainer, probeTop)) {
+            restoreProbeActive = true;
+            settledGeometryKey = "";
+            settledProbeGeometryKey = "";
+          }
+        }
+      }
+      await waitForHydrationPollFn(pollMs);
+    }
+    if (conversationRouteKey() !== routeKey) {
+      return { status: "conflict", reason: "conversation route changed during Visualize hydration" };
+    }
+    if (scrollContainer?.isConnected === false) {
+      return { status: "conflict", reason: "conversation scroll container changed during Visualize hydration" };
+    }
+    const finalEntries = getVerifiedConversationTurnEntries(root);
+    const finalPinnedBoundary = validatePinnedRecoveryBoundary(finalEntries);
+    if (finalPinnedBoundary) return finalPinnedBoundary;
+    if (restoreProbeActive && conversationRouteKey() === routeKey && !restoreLogicalPosition()) {
+      return { status: "conflict", reason: "conversation scroll position could not be restored" };
+    }
+    if (sawRestoredTarget) {
+      return { status: "missing", reason: "restored Visualize target did not settle at the original scroll position" };
+    }
+    return { status: "missing", reason: "restored Visualize target could not be reacquired" };
+  }
+
+  async function recoverHydratedVisualizeMissingQ2(
+    currentAssistantNode,
+    visualizeContext,
+    {
+      root = document,
+      runtimeGuard = null,
+      allowVerifiedHydrationRemount = false
+    } = {}
+  ) {
+    const beforeRecovery = revalidateHydratedVisualizeContext(
+      currentAssistantNode,
+      visualizeContext,
+      { root }
+    );
+    if (beforeRecovery.ok) return beforeRecovery;
+    if (!beforeRecovery.retryableMissingHydrationWindow &&
+        !beforeRecovery.retryableMissingQ2 &&
+        !(allowVerifiedHydrationRemount && beforeRecovery.verifiedHydrationRemount === true)) {
+      return beforeRecovery;
+    }
+
+    const recovery = visualizeContext?.hydrationRecovery || null;
+    const proof = visualizeContext?.hydrationVerification || null;
+    if (!recovery || recovery.attempted === true || !proof?.anchors) {
+      return {
+        ok: false,
+        reason: recovery?.attempted === true
+          ? "hydrated Visualize Q2 recovery was already attempted"
+          : "hydrated Visualize Q2 recovery evidence is missing"
+      };
+    }
+    // Spend the only recovery before awaiting. A route/runtime/layout race may
+    // never fan out into repeated scrolls or repeated external boundaries.
+    recovery.attempted = true;
+    if (conversationRouteKey() !== proof.routeKey) {
+      return { ok: false, reason: "conversation route changed before hydrated Visualize Q2 recovery" };
+    }
+    if (runtimeGuard?.isAborted?.()) {
+      return { ok: false, reason: "extension runtime changed before hydrated Visualize Q2 recovery" };
+    }
+    if (recovery.scrollContainer?.isConnected === false) {
+      return { ok: false, reason: "conversation scroll container changed before hydrated Visualize Q2 recovery" };
+    }
+
+    const restored = await restoreVisualizeHydrationWindow({
+      root: recovery.root || root,
+      scrollContainer: recovery.scrollContainer,
+      scrollSnapshot: recovery.scrollSnapshot,
+      routeKey: proof.routeKey,
+      anchors: proof.anchors,
+      expectedRichBlockCount: proof.expectedRichBlockCount,
+      requireA1AtRestoredWindow: proof.requireA1AtRestoredWindow !== false,
+      expectedPinnedA2Node: currentAssistantNode,
+      resolveCurrentScrollContainer: recovery.resolveCurrentScrollContainer,
+      restoreProbeStepPx: recovery.restoreProbeStepPx,
+      timeoutMs: recovery.timeoutMs,
+      pollMs: recovery.pollMs,
+      runtimeGuard,
+      nowFn: recovery.nowFn,
+      waitForHydrationPollFn: recovery.waitForHydrationPollFn
+    });
+    if (restored?.status !== "found") {
+      return {
+        ok: false,
+        reason: restored?.reason || "hydrated Visualize Q2 could not be reacquired"
+      };
+    }
+    if (restored.a2?.node !== currentAssistantNode ||
+        restored.a2?.node !== visualizeContext.visualizeAnswerNode) {
+      return { ok: false, reason: "hydrated Visualize A2 changed during Q2 recovery" };
+    }
+
+    visualizeContext.visualizeRequestNode = restored.q2.node;
+    if (proof.requireA1AtRestoredWindow !== false) {
+      if (!restored.a1?.node) {
+        return { ok: false, reason: "hydrated Visualize A1 was not reacquired" };
+      }
+      visualizeContext.answerNode = restored.a1.node;
+    }
+    const strictStatus = revalidateHydratedVisualizeContext(
+      currentAssistantNode,
+      visualizeContext,
+      { root: recovery.root || root }
+    );
+    if (!strictStatus.ok) {
+      return {
+        ok: false,
+        reason: strictStatus.reason || "hydrated Visualize Q2 recovery proof failed"
+      };
+    }
+    return {
+      ...strictStatus,
+      recoveredHydrationWindow: true,
+      recoveredQ2: true
+    };
+  }
+
+  async function resolveVisualizeSaveContextWithHydration(currentAssistantNode, options = {}) {
+    let synchronous;
+    try {
+      synchronous = resolveVisualizeSaveContext(currentAssistantNode);
+    } catch (error) {
+      return { mode: "unresolved", reason: error?.message || "Visualize context resolution failed" };
+    }
+    const missingQ1BeforeA1 = synchronous?.code === "missing-q1-before-a1" ||
+      synchronous?.reason === "Q1 could not be resolved before A1";
+    const missingA1BeforeQ2 = synchronous?.code === "missing-a1-before-q2";
+    if (synchronous?.mode !== "unresolved" || (!missingQ1BeforeA1 && !missingA1BeforeQ2)) {
+      return synchronous;
+    }
+
+    const root = options.root?.querySelectorAll ? options.root : document;
+    const entries = getVerifiedConversationTurnEntries(root);
+    const currentTurn = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || null;
+    const a2Index = entries.findIndex(entry => entry.turn === currentTurn);
+    if (a2Index < 0) return synchronous;
+    const q2 = [...entries.slice(0, a2Index)].reverse()
+      .find(entry => !entry.ambiguous && entry.role === "user");
+    if (!q2) return synchronous;
+    const q2Index = entries.indexOf(q2);
+    const initialA1 = [...entries.slice(0, q2Index)].reverse()
+      .find(entry => !entry.ambiguous && entry.role === "assistant");
+    const requestText = visualizeRequestNodeToPlainText(q2.node);
+    if (!isExplicitVisualizeRequestNode(q2.node) ||
+        !isPreviousAnswerVisualizationRequestText(requestText)) {
+      return synchronous;
+    }
+    if (missingQ1BeforeA1 && !initialA1) return synchronous;
+    if (missingA1BeforeQ2 && entries.slice(0, q2Index)
+      .some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return synchronous;
+    }
+
+    const requireA1AtRestoredWindow = !missingA1BeforeQ2;
+    const routeKey = conversationRouteKey();
+    const scrollContainer = options.scrollContainer || resolveConversationScrollContainer(currentTurn, { root });
+    if (!routeKey || !scrollContainer || !Number.isFinite(Number(scrollContainer?.scrollTop))) {
+      return { mode: "unresolved", reason: "Visualize conversation scroll context could not be resolved" };
+    }
+    const expectedRichBlockCount = collectRichAppBlockCandidates(currentAssistantNode).length;
+    const clickQ2Snapshot = captureHydrationTurn(q2);
+    const clickA1Snapshot = initialA1 ? captureHydrationTurn(initialA1) : null;
+    const clickA2Proof = hydrationTurnProof(entries[a2Index]);
+    const clickA2Key = verifiedTurnIdentity(entries[a2Index]);
+    const clickWindowProof = {
+      a1: clickA1Snapshot,
+      q2: clickQ2Snapshot,
+      a2: {
+        key: clickA2Key,
+        role: entries[a2Index]?.role || "",
+        coreFingerprint: hydrationTurnCoreFingerprintFromProof(clickA2Proof),
+        richAppBlockShape: hydrationRichAppBlockShape(clickA2Proof?.richAppStructure || [])
+      }
+    };
+    const clickProofKeys = [clickA1Snapshot?.key, clickQ2Snapshot?.key, clickA2Key].filter(Boolean);
+    if (!clickQ2Snapshot || !clickA2Key || !clickWindowProof.a2.coreFingerprint ||
+        (initialA1 && !clickA1Snapshot) || new Set(clickProofKeys).size !== clickProofKeys.length) {
+      return { mode: "unresolved", reason: "Visualize hydration requires unique stable turn identities" };
+    }
+    const maxScrollSteps = Math.max(1, Math.min(32, Number(options.maxScrollSteps) || 16));
+    const scrollStepPx = Math.max(200, Number(options.scrollStepPx) || Math.max(600, Number(scrollContainer.clientHeight || 0) * 0.85));
+    const timeoutMs = Math.max(40, Number(options.timeoutMs) || 8000);
+    const pollMs = Math.max(1, Number(options.pollMs) || 60);
+    const nowFn = typeof options.nowFn === "function" ? options.nowFn : Date.now;
+    const waitForHydrationPollFn = typeof options.waitForHydrationPollFn === "function"
+      ? options.waitForHydrationPollFn
+      : waitForHydrationPoll;
+    const restorationTimeoutMs = Math.max(80, Math.min(3000, timeoutMs));
+    const appReadinessTimeoutMs = Math.max(
+      40,
+      Math.min(3000, Number(options.appReadinessTimeoutMs) || timeoutMs)
+    );
+    const readyClickWindow = await waitForStableHydrationClickWindow({
+      root,
+      a1Node: initialA1?.node || null,
+      q2Node: q2.node,
+      a2Node: currentAssistantNode,
+      clickWindowProof,
+      scrollContainer,
+      resolveCurrentScrollContainer: options.scrollContainer
+        ? null
+        : entry => resolveConversationScrollContainer(entry?.turn, { root }),
+      routeKey,
+      expectedRichBlockCount,
+      timeoutMs: appReadinessTimeoutMs,
+      pollMs,
+      runtimeGuard: options.runtimeGuard,
+      nowFn,
+      waitForHydrationPollFn
+    });
+    if (readyClickWindow.status !== "found") {
+      return {
+        mode: "unresolved",
+        reason: readyClickWindow.reason || "Visualize app runtime was not ready before hydration"
+      };
+    }
+    let a1Snapshot = clickA1Snapshot;
+    const q2Snapshot = clickQ2Snapshot;
+    const a2Snapshot = captureHydrationTurn(readyClickWindow.a2);
+    const initialSnapshots = [a1Snapshot, q2Snapshot, a2Snapshot].filter(Boolean);
+    if (!q2Snapshot || !a2Snapshot || (initialA1 && !a1Snapshot) ||
+        new Set(initialSnapshots.map(snapshot => snapshot.key)).size !== initialSnapshots.length) {
+      return { mode: "unresolved", reason: "Visualize hydration requires unique stable turn identities" };
+    }
+    const originalScrollTop = Number(scrollContainer.scrollTop);
+    const scrollSnapshot = {
+      scrollTop: originalScrollTop,
+      scrollLeft: Number(scrollContainer.scrollLeft || 0),
+      bottomOffset: Math.max(0,
+        Number(scrollContainer.scrollHeight || 0) -
+        Number(scrollContainer.clientHeight || 0) -
+        originalScrollTop
+      )
+    };
+    const followingNavigationAnchor = captureFollowingHydrationNavigationAnchor(
+      readyClickWindow.entries,
+      readyClickWindow.a2,
+      scrollContainer
+    );
+    const maxFollowingAnchorCorrectionPx = maxScrollSteps * scrollStepPx;
+    const deadline = nowFn() + timeoutMs;
+    let recoveredQuestion = null;
+    let recoveredAnswer = null;
+    let failureReason = "Q1 could not be recovered from verified virtualized turn overlap";
+    let hydrationConflict = false;
+    let restored = null;
+
+    try {
+      for (let step = 0; step < maxScrollSteps && nowFn() <= deadline; step += 1) {
+        if (conversationRouteKey() !== routeKey) {
+          failureReason = "conversation route changed during Visualize hydration";
+          break;
+        }
+        if (options.runtimeGuard?.isAborted?.()) {
+          failureReason = "extension runtime changed during Visualize hydration";
+          break;
+        }
+        const beforeTop = Number(scrollContainer.scrollTop || 0);
+        const nextTop = Math.max(0, beforeTop - scrollStepPx);
+        if (nextTop === beforeTop) break;
+        if (!setConversationScrollTop(scrollContainer, nextTop)) {
+          failureReason = "conversation scroll movement could not be applied";
+          break;
+        }
+
+        const remainingMs = Math.max(0, deadline - nowFn());
+        const remainingSteps = Math.max(1, maxScrollSteps - step);
+        const stepWaitMs = Math.max(
+          500,
+          pollMs * 3,
+          Number(options.stepWaitMs) || 0,
+          Math.floor(remainingMs / remainingSteps)
+        );
+        const stepDeadline = Math.min(deadline, nowFn() + stepWaitMs);
+        do {
+          if (options.runtimeGuard?.isAborted?.()) {
+            failureReason = "extension runtime changed during Visualize hydration";
+            break;
+          }
+          const observedEntries = getVerifiedConversationTurnEntries(root);
+          let recoveredAnswerThisPoll = false;
+          if (!a1Snapshot) {
+            const observedAnswer = mountedPreviousAnswerForRequestAnchor(
+              observedEntries,
+              q2Snapshot,
+              [a2Snapshot]
+            );
+            if (observedAnswer.status === "found") {
+              a1Snapshot = observedAnswer.a1Snapshot;
+              recoveredAnswer = observedAnswer;
+              recoveredAnswerThisPoll = true;
+            } else if (observedAnswer.status === "conflict") {
+              failureReason = observedAnswer.reason || "virtualized A1/Q2 overlap conflict";
+              hydrationConflict = true;
+              break;
+            }
+          }
+          if (a1Snapshot) {
+            const observedQuestion = mountedPreviousQuestionForAnchor(
+              observedEntries,
+              a1Snapshot,
+              [q2Snapshot, a2Snapshot]
+            );
+            if (observedQuestion.status === "found") {
+              recoveredQuestion = observedQuestion;
+              break;
+            }
+            if (observedQuestion.status === "conflict") {
+              failureReason = observedQuestion.reason || "virtualized Q1/A1 overlap conflict";
+              hydrationConflict = true;
+              break;
+            }
+            if (recoveredAnswerThisPoll) break;
+          }
+          if (nowFn() >= stepDeadline) break;
+          await waitForHydrationPollFn(pollMs);
+        } while (nowFn() <= stepDeadline);
+        if (recoveredQuestion || hydrationConflict) break;
+        if (nextTop === 0) break;
+      }
+    } catch (error) {
+      failureReason = error?.message || "Visualize hydration failed";
+    } finally {
+      restored = await restoreVisualizeHydrationWindow({
+        root,
+        scrollContainer,
+        scrollSnapshot,
+        routeKey,
+        anchors: { a1: a1Snapshot, q2: q2Snapshot, a2: a2Snapshot },
+        expectedRichBlockCount,
+        requireA1AtRestoredWindow,
+        resolveCurrentScrollContainer: options.scrollContainer
+          ? null
+          : entry => resolveConversationScrollContainer(entry?.turn, { root }),
+        followingNavigationAnchor,
+        maxFollowingAnchorCorrectionPx,
+        restoreProbeStepPx: scrollStepPx,
+        timeoutMs: restorationTimeoutMs,
+        pollMs,
+        runtimeGuard: options.runtimeGuard,
+        nowFn,
+        waitForHydrationPollFn
+      });
+    }
+
+    if (restored?.status !== "found") {
+      return { mode: "unresolved", reason: restored?.reason || "Visualize hydration restoration failed" };
+    }
+    if (!a1Snapshot || !recoveredQuestion || (missingA1BeforeQ2 && !recoveredAnswer)) {
+      return { mode: "unresolved", reason: failureReason };
+    }
+    if (conversationRouteKey() !== routeKey) {
+      return { mode: "unresolved", reason: "conversation route changed during Visualize hydration" };
+    }
+
+    const answerNode = requireA1AtRestoredWindow
+      ? restored.a1?.node || null
+      : recoveredAnswer?.answerNode || null;
+    const answerText = requireA1AtRestoredWindow
+      ? hydrationTurnText(restored.a1)
+      : recoveredAnswer?.answerText || "";
+    if (!recoveredQuestion.questionText || !answerText) {
+      return { mode: "unresolved", reason: "hydrated Q1 or A1 Markdown is empty" };
+    }
+    if (!answerNode) {
+      return { mode: "unresolved", reason: "hydrated A1 conversion payload is missing" };
+    }
+    return {
+      mode: "previous-qa",
+      questionNode: null,
+      answerNode,
+      visualizeRequestNode: restored.q2.node,
+      visualizeAnswerNode: restored.a2.node,
+      questionText: recoveredQuestion.questionText,
+      answerText,
+      visualizeRequestText: restored.requestText,
+      hydratedFromVirtualizedTurns: true,
+      hydrationRecovery: {
+        attempted: false,
+        root,
+        scrollContainer,
+        resolveCurrentScrollContainer: options.scrollContainer
+          ? null
+          : entry => resolveConversationScrollContainer(entry?.turn, { root }),
+        scrollSnapshot: Object.freeze({ ...scrollSnapshot }),
+        restoreProbeStepPx: scrollStepPx,
+        timeoutMs: restorationTimeoutMs,
+        pollMs,
+        nowFn,
+        waitForHydrationPollFn
+      },
+      hydrationVerification: {
+        routeKey,
+        anchors: {
+          q1: recoveredQuestion.q1Snapshot,
+          a1: a1Snapshot,
+          q2: q2Snapshot,
+          a2: a2Snapshot
+        },
+        expectedRichBlockCount,
+        proofKind: missingA1BeforeQ2 ? "sequential-overlap" : "a1-overlap",
+        requireA1AtRestoredWindow,
+        questionTextFingerprint: stableTurnFingerprint(recoveredQuestion.questionText),
+        answerTextFingerprint: stableTurnFingerprint(answerText),
+        answerNodeFingerprint: requireA1AtRestoredWindow
+          ? ""
+          : recoveredAnswer.answerFingerprint
+      }
+    };
+  }
+
+  function visualizeAttemptKeyForNode(currentAssistantNode) {
+    const turn = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || null;
+    if (!turn) return "";
+    const turnKey = verifiedTurnIdentity({ turn, node: currentAssistantNode }) || String(
+      turn.getAttribute?.("data-turn-id") || turn.getAttribute?.("data-testid") || ""
+    ).trim();
+    const routeKey = conversationRouteKey();
+    return routeKey && turnKey ? `${routeKey}::visualize-attempt::${turnKey}` : "";
+  }
+
   function resolveVisualizeSaveContext(currentAssistantNode) {
-    const unresolved = reason => ({ mode: "unresolved", reason });
+    const unresolved = (reason, code = "") => ({ mode: "unresolved", reason, ...(code ? { code } : {}) });
     if (!currentAssistantNode) return unresolved("current assistant node was not found");
     if (roleAttrForNode(currentAssistantNode) !== "assistant") {
       return unresolved("current node is not an assistant turn");
@@ -1975,12 +3699,25 @@
       return unresolved("Q2 and A2 correspondence is ambiguous");
     }
 
-    const visualizeRequestForPreviousQa = isVisualizeRequestForAssistant(q2.node, currentAssistantNode);
+    const visualizeRequestForAssistant = isVisualizeRequestForAssistant(q2.node, currentAssistantNode);
     const explicitVisualizeRequest = isExplicitVisualizeRequestNode(q2.node);
-    if (!visualizeRequestForPreviousQa) return unresolved("the preceding user turn is not a Visualize request");
+    if (!visualizeRequestForAssistant) return unresolved("the preceding user turn is not a Visualize request");
 
-    const priorAssistants = earlierEntries.filter(entry => entry.role === "assistant" && !entry.ambiguous);
-    if (priorAssistants.length) {
+    const visualizeRequestText = visualizeRequestNodeToPlainText(q2.node);
+    const referencesPreviousAnswer = isPreviousAnswerVisualizationRequestText(visualizeRequestText);
+    // A marker-less retry variant is admitted only by the narrow existing
+    // response-variant evidence. Preserve its prior Q/A behavior instead of
+    // broadening direct mode beyond an explicit Visualize provider marker.
+    const usePreviousQa = referencesPreviousAnswer || !explicitVisualizeRequest;
+
+    if (usePreviousQa) {
+      const priorAssistants = earlierEntries.filter(entry => entry.role === "assistant" && !entry.ambiguous);
+      if (!priorAssistants.length) {
+        return unresolved(
+          "previous-answer Visualize request requires a verified Q1/A1 pair",
+          "missing-a1-before-q2"
+        );
+      }
       const a1 = priorAssistants[priorAssistants.length - 1];
       const a1Index = entries.indexOf(a1);
       const betweenA1AndQ2 = entries.slice(a1Index + 1, entries.indexOf(q2));
@@ -1989,13 +3726,13 @@
       }
       const priorUsers = entries.slice(0, a1Index).filter(entry => entry.role === "user" && !entry.ambiguous);
       const q1 = priorUsers[priorUsers.length - 1];
-      if (!q1) return unresolved("Q1 could not be resolved before A1");
+      if (!q1) return unresolved("Q1 could not be resolved before A1", "missing-q1-before-a1");
       const q1Index = entries.indexOf(q1);
       const betweenQ1AndA1 = entries.slice(q1Index + 1, a1Index);
       if (betweenQ1AndA1.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
         return unresolved("Q1/A1 correspondence is ambiguous");
       }
-      const questionText = cleanQuestionText(messageNodeToPlainText(q1.node));
+      const questionText = questionNodeToPlainText(q1.node);
       const renderedAnswer = assistantNodeToMarkdown(a1.node);
       const answerText = stripChatGptFooterLines(cleanAnswerText(repairFencedCodeBlocks(
         renderedAnswer || String(a1.node.innerText || a1.node.textContent || "")
@@ -2009,19 +3746,35 @@
         visualizeAnswerNode: currentAssistantNode,
         questionText,
         answerText,
-        visualizeRequestText: visualizeRequestNodeToPlainText(q2.node)
+        visualizeRequestText
       };
     }
 
-    // A direct capture is valid only when the DOM proves that there was no
-    // earlier real user/assistant exchange at all. Any earlier QA candidate or
-    // ambiguous role is treated as a possible missing/virtualized pair.
+    // An independent Q2 owns its resulting A2 even when a complete earlier
+    // exchange exists. Keep failing closed on incomplete or ambiguous earlier
+    // role evidence, but do not substitute the verified Q1/A1 body merely
+    // because it is present.
     const entriesBeforeQ2 = entries.slice(0, entries.indexOf(q2));
-    if (entriesBeforeQ2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
-      return unresolved("an earlier Q1/A1 candidate exists; direct mode is unsafe");
+    if (entriesBeforeQ2.some(entry => entry.ambiguous)) {
+      return unresolved("an earlier conversation turn is ambiguous");
+    }
+    const earlierRoles = entriesBeforeQ2
+      .filter(entry => entry.role === "user" || entry.role === "assistant")
+      .map(entry => entry.role);
+    let roleIndex = earlierRoles[0] === "assistant" ? 1 : 0;
+    let earlierHistoryComplete = roleIndex === 0 || earlierRoles.length >= 1;
+    while (earlierHistoryComplete && roleIndex < earlierRoles.length) {
+      if (earlierRoles[roleIndex] !== "user" || earlierRoles[roleIndex + 1] !== "assistant") {
+        earlierHistoryComplete = false;
+        break;
+      }
+      roleIndex += 2;
+    }
+    if (!earlierHistoryComplete) {
+      return unresolved("an earlier Q1/A1 candidate is incomplete");
     }
     if (!explicitVisualizeRequest) return unresolved("direct mode requires an explicit Visualize plugin marker");
-    const questionText = visualizeRequestNodeToPlainText(q2.node);
+    const questionText = visualizeRequestText;
     if (!questionText) return unresolved("Visualize request Markdown is empty");
     return {
       mode: "direct-visualize",
@@ -2033,6 +3786,97 @@
       answerText: "",
       visualizeRequestText: questionText
     };
+  }
+
+  function resolvePreviousQaRichAppSaveContext(currentAssistantNode) {
+    const unresolved = reason => ({ mode: "unresolved", reason });
+    const richAppEvidence = resolveProviderNeutralRichAppEvidence(currentAssistantNode);
+    if (!richAppEvidence.ok) return unresolved(richAppEvidence.reason || "current assistant has no verified rich app runtime");
+
+    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    const entries = getVerifiedConversationTurnEntries();
+    const currentMatches = entries.filter(entry => entry.turn === currentTurn);
+    if (currentMatches.length !== 1) return unresolved("current assistant turn is missing or duplicated");
+    const currentEntry = currentMatches[0];
+    const currentIndex = entries.indexOf(currentEntry);
+    if (currentIndex < 0 || currentEntry.ambiguous || currentEntry.role !== "assistant" || currentEntry.node !== currentAssistantNode) {
+      return unresolved("current assistant turn is ambiguous");
+    }
+
+    const q2 = [...entries.slice(0, currentIndex)].reverse().find(entry => entry.role === "user" && !entry.ambiguous);
+    if (!q2) return unresolved("provider-neutral rich app request turn could not be resolved");
+    const q2Index = entries.indexOf(q2);
+    const betweenQ2AndA2 = entries.slice(q2Index + 1, currentIndex);
+    if (betweenQ2AndA2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return unresolved("Q2 and rich app answer correspondence is ambiguous");
+    }
+
+    const pluginMentionSelector = [
+      "[data-id^='plugin:']",
+      "[data-plugin-id]",
+      "[data-inline-selection-pill]",
+      "[data-testid*='plugin' i]"
+    ].join(",");
+    if (nodesIncludingRoot(q2.node, pluginMentionSelector).length || isExplicitVisualizeRequestNode(q2.node)) {
+      return unresolved("request has structured provider provenance; use the provider-specific resolver");
+    }
+
+    const a1 = [...entries.slice(0, q2Index)].reverse().find(entry => entry.role === "assistant" && !entry.ambiguous);
+    if (!a1) return unresolved("A1 could not be resolved before the rich app request");
+    const a1Index = entries.indexOf(a1);
+    const betweenA1AndQ2 = entries.slice(a1Index + 1, q2Index);
+    if (betweenA1AndQ2.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return unresolved("A1 and Q2 correspondence is ambiguous");
+    }
+    if (collectRichAppBlockCandidates(a1.node).length) {
+      return unresolved("A1 is itself a rich app result; use the continuation resolver");
+    }
+
+    const q1 = [...entries.slice(0, a1Index)].reverse().find(entry => entry.role === "user" && !entry.ambiguous);
+    if (!q1) return unresolved("Q1 could not be resolved before A1");
+    const q1Index = entries.indexOf(q1);
+    const betweenQ1AndA1 = entries.slice(q1Index + 1, a1Index);
+    if (betweenQ1AndA1.some(entry => entry.ambiguous || entry.role === "user" || entry.role === "assistant")) {
+      return unresolved("Q1 and A1 correspondence is ambiguous");
+    }
+
+    const questionText = questionNodeToPlainText(q1.node);
+    const renderedAnswer = assistantNodeToMarkdown(a1.node);
+    const answerText = stripChatGptFooterLines(cleanAnswerText(repairFencedCodeBlocks(
+      renderedAnswer || String(a1.node.innerText || a1.node.textContent || "")
+    )));
+    if (!questionText || !answerText) return unresolved("Q1 or A1 Markdown is empty");
+    return {
+      mode: "previous-qa-rich-app",
+      questionNode: q1.node,
+      answerNode: a1.node,
+      requestNode: q2.node,
+      currentAppAnswerNode: currentAssistantNode,
+      questionText,
+      answerText,
+      provider: "unknown",
+      richAppEvidence
+    };
+  }
+
+  function revalidatePreviousQaRichAppContext(currentAssistantNode, expectedContext) {
+    if (!expectedContext || expectedContext.mode !== "previous-qa-rich-app" || expectedContext.provider !== "unknown") {
+      return { ok: false, reason: "provider-neutral rich app context is missing or has invalid provenance" };
+    }
+    const currentContext = resolvePreviousQaRichAppSaveContext(currentAssistantNode);
+    if (currentContext.mode !== "previous-qa-rich-app") {
+      return { ok: false, reason: currentContext.reason || "provider-neutral rich app evidence could not be revalidated" };
+    }
+    const sameContext = currentContext.currentAppAnswerNode === currentAssistantNode
+      && expectedContext.currentAppAnswerNode === currentAssistantNode
+      && currentContext.questionNode === expectedContext.questionNode
+      && currentContext.answerNode === expectedContext.answerNode
+      && currentContext.requestNode === expectedContext.requestNode
+      && currentContext.provider === "unknown";
+    if (!sameContext) {
+      return { ok: false, reason: "provider-neutral rich app context changed before Share" };
+    }
+    return { ok: true, context: currentContext };
   }
 
   // ChatGPT may serialize a follow-up action from an interactive app as an
@@ -2093,7 +3937,7 @@
       return unresolved("previous assistant turn has no rich app block");
     }
 
-    const questionText = cleanQuestionText(messageNodeToPlainText(q2.node));
+    const questionText = questionNodeToPlainText(q2.node);
     if (!questionText) return unresolved("continuation request Markdown is empty");
     return {
       mode: "rich-app-continuation",
@@ -2589,6 +4433,184 @@
     return Array.from(surfaces || []).map(captureShareSurfaceSnapshot);
   }
 
+  function isCurrentVisibleFinalShareSurface(surface) {
+    return !!surface &&
+      surface.isConnected !== false &&
+      shareSurfaceVisibilityDetails(surface).visible &&
+      classifyShareSurface(surface) === "final";
+  }
+
+  function isSameNestedShareSurfaceFamily(first, second) {
+    return !!first && !!second && (
+      first === second ||
+      first?.contains?.(second) ||
+      second?.contains?.(first)
+    );
+  }
+
+  function isResponseShareSurfaceSelectionFailure(result) {
+    const reason = String(result?.reason || "");
+    return reason === VERIFIED_RESPONSE_SHARE_SURFACE_MISSING ||
+      reason === RESPONSE_SHARE_IFRAME_DUPLICATED ||
+      reason === RESPONSE_SHARE_IFRAME_RELOCATION_MISMATCH;
+  }
+
+  function shareSurfaceChangedSinceBaseline(surface, beforeSnapshots = []) {
+    const current = captureShareSurfaceSnapshot(surface);
+    const previous = Array.from(beforeSnapshots || [])
+      .find(item => item?.node === surface);
+    return !previous || !previous.visible || previous.signature !== current.signature;
+  }
+
+  // ChatGPT can preserve the visible Share modal while React replaces the
+  // backing DOM node. Reacquire only a single fresh final-surface family from
+  // this exact Share attempt. Keeping the outermost final candidate preserves
+  // a portaled app preview when its controls live in a nested region; the
+  // hydrated A2 validator still has to prove the exact wrapper/source shape.
+  function reacquireFreshFinalShareSurface(_preferredSurface, options = {}) {
+    if (typeof options.getDialogs !== "function") {
+      return {
+        ok: false,
+        stage: "share-dialog",
+        reason: VERIFIED_RESPONSE_SHARE_SURFACE_MISSING,
+        retryable: false
+      };
+    }
+    let visibleSurfaces;
+    try {
+      visibleSurfaces = Array.from(options.getDialogs() || []);
+    } catch (error) {
+      return {
+        ok: false,
+        stage: "share-dialog",
+        reason: error?.message || VERIFIED_RESPONSE_SHARE_SURFACE_MISSING,
+        retryable: false
+      };
+    }
+    const copySuccessSurface = options.copySuccessSurface || null;
+    const admitCopySuccessCandidates = options.copyClicked === true &&
+      options.copySignalObserved === true;
+    const admitCopySuccessFamily = admitCopySuccessCandidates &&
+      !!copySuccessSurface &&
+      copySuccessSurface.isConnected !== false &&
+      shareSurfaceVisibilityDetails(copySuccessSurface).visible &&
+      copySuccessEntries(copySuccessSurface, null).length > 0;
+    const candidates = visibleSurfaces
+      .filter(surface => surface?.isConnected !== false)
+      .filter(surface => shareSurfaceVisibilityDetails(surface).visible)
+      .filter(surface => shareSurfaceChangedSinceBaseline(surface, options.beforeSurfaces))
+      .map(node => ({
+        node,
+        kind: classifyShareSurface(node) || (
+          admitCopySuccessCandidates && (
+            (admitCopySuccessFamily && isSameNestedShareSurfaceFamily(node, copySuccessSurface)) ||
+            copySuccessEntries(node, null).length > 0
+          )
+            ? "final"
+            : ""
+        )
+      }))
+      .filter(item => !!item.kind);
+    const familyLeaves = collapseNestedShareSurfaces(candidates);
+    if (familyLeaves.length !== 1 || familyLeaves[0].kind !== "final") {
+      return {
+        ok: false,
+        stage: "share-dialog",
+        reason: VERIFIED_RESPONSE_SHARE_SURFACE_MISSING,
+        candidateCount: familyLeaves.length,
+        retryable: familyLeaves.length === 0
+      };
+    }
+    const leaf = familyLeaves[0].node;
+    const familyChain = candidates
+      .filter(item => item.kind === "final")
+      .map(item => item.node)
+      .filter(surface => (
+        surface === leaf || surface?.contains?.(leaf)
+      ));
+    const representative = familyChain.find(surface => !familyChain.some(other => (
+      other !== surface && other?.contains?.(surface)
+    ))) || leaf;
+    return {
+      ok: true,
+      surface: representative,
+      reacquired: representative !== _preferredSurface
+    };
+  }
+
+  // React can unmount S1 and mount its equivalent S2 on the next task. Wait
+  // only for the empty-candidate gap; ambiguity, an intermediate surface, a
+  // runtime change, or a failed A2 source proof remains terminal.
+  async function waitForFreshFinalShareSurface(preferredSurface, options = {}) {
+    const maxEmptyRetries = Number.isFinite(options.maxEmptyRetries)
+      ? Math.max(0, Math.floor(options.maxEmptyRetries))
+      : 2;
+    const configuredPollMs = Number.isFinite(options.pollMs) ? Math.max(1, options.pollMs) : 25;
+    const retryDelayMs = Number.isFinite(options.shareSurfaceRetryDelayMs)
+      ? Math.max(1, options.shareSurfaceRetryDelayMs)
+      : Math.min(25, configuredPollMs);
+    const waitForRetry = options.waitForShareSurfaceRetry || (ms => sleep(ms));
+    const validateSurface = typeof options.validateSurface === "function"
+      ? options.validateSurface
+      : null;
+    const phase = String(options.phase || "share-surface-reacquire");
+
+    const inspectCurrentState = () => {
+      const surfaceStatus = reacquireFreshFinalShareSurface(preferredSurface, options);
+      if (surfaceStatus.ok) {
+        if (validateSurface) {
+          const candidateStatus = validateSurface(surfaceStatus.surface);
+          if (candidateStatus?.ok === false) return { ...candidateStatus, retryable: false };
+        }
+        return surfaceStatus;
+      }
+      if (!surfaceStatus.retryable) return surfaceStatus;
+      if (validateSurface) {
+        const preferredStatus = validateSurface(preferredSurface);
+        if (preferredStatus?.ok === false &&
+            String(preferredStatus.reason || "") !== VERIFIED_RESPONSE_SHARE_SURFACE_MISSING) {
+          return { ...preferredStatus, retryable: false };
+        }
+      }
+      return surfaceStatus;
+    };
+
+    if (options.runtimeGuard?.isAborted?.()) {
+      return {
+        ok: false,
+        stage: "runtime",
+        reason: options.runtimeGuard.getFailure?.()?.error || "runtime unavailable"
+      };
+    }
+    let surfaceStatus = inspectCurrentState();
+    if (surfaceStatus.ok || !surfaceStatus.retryable || maxEmptyRetries === 0) return surfaceStatus;
+
+    for (let attempt = 1; attempt <= maxEmptyRetries; attempt += 1) {
+      await waitForRetry(retryDelayMs);
+      if (options.runtimeGuard?.isAborted?.()) {
+        return {
+          ok: false,
+          stage: "runtime",
+          reason: options.runtimeGuard.getFailure?.()?.error || "runtime unavailable"
+        };
+      }
+      if (options.runtimeGuard?.check) {
+        const runtimeStatus = await checkRuntimeGuard(options.runtimeGuard, `${phase}-retry-${attempt}`);
+        if (!runtimeStatus?.ok) {
+          return { ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" };
+        }
+      }
+      surfaceStatus = inspectCurrentState();
+      if (surfaceStatus.ok || !surfaceStatus.retryable || attempt >= maxEmptyRetries) return surfaceStatus;
+    }
+    return {
+      ok: false,
+      stage: "share-dialog",
+      reason: VERIFIED_RESPONSE_SHARE_SURFACE_MISSING,
+      retryable: false
+    };
+  }
+
   async function waitForRelevantShareDialog(beforeDialogs = [], options = {}) {
     const root = options.root || document;
     const beforeSnapshots = new Map();
@@ -2967,14 +4989,41 @@
     return { ok: false, stage: "share-update", reason: "a refreshed conversation share URL was not confirmed after Update link" };
   }
 
+  function validateShareContextBoundary(
+    options = {},
+    phase = "share-context",
+    stage = "share-context",
+    boundaryContext = {}
+  ) {
+    const validator = options.validateShareContext;
+    if (typeof validator !== "function") return { ok: true };
+    try {
+      const result = validator(phase, boundaryContext);
+      if (result?.ok === false) {
+        return {
+          ok: false,
+          stage: result.stage || stage,
+          reason: result.reason || "hydrated Visualize context changed before Share"
+        };
+      }
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        stage,
+        reason: error?.message || "hydrated Visualize context validation failed"
+      };
+    }
+  }
+
   async function resolveShareUrlFromCopySurface(surface, options = {}) {
-    const copyButton = findCopyShareLinkButton(surface);
     const waitForSuccess = options.waitForCopySuccess || waitForCopySuccess;
     const readClipboardText = options.readClipboardText || (() => navigator.clipboard.readText());
     const requestManualUrl = options.requestManualShareUrl || requestManualVisualizeShareUrl;
     let clipboardText = "";
     let manualText = "";
     let activeSurface = surface;
+    let copyButton = null;
     let copyClicked = false;
     let copySignalObserved = false;
     const checkRuntime = async phase => {
@@ -2985,13 +5034,71 @@
         const status = await checkRuntimeGuard(options.runtimeGuard, phase);
         if (!status?.ok) return { ok: false, stage: "runtime", reason: status?.error || "runtime unavailable" };
       }
+      const validateActiveSurface = (candidate = activeSurface) => validateShareContextBoundary(
+        options,
+        phase,
+        "share-dialog",
+        {
+          shareKind: options.shareKind === "conversation" ? "conversation" : "response",
+          shareSurface: candidate,
+          copyClicked,
+          copySignalObserved
+        }
+      );
+      let contextStatus = validateActiveSurface();
+      if (!contextStatus.ok && !isResponseShareSurfaceSelectionFailure(contextStatus)) {
+        return contextStatus;
+      }
+      const verifiedCopyClosedSurface = contextStatus.ok &&
+        copyClicked &&
+        copySignalObserved &&
+        (activeSurface?.isConnected === false || !shareSurfaceVisibilityDetails(activeSurface).visible);
+      const hydratedResponseSurface = options.shareKind === "response" &&
+        typeof options.validateShareContext === "function";
+      if (verifiedCopyClosedSurface && hydratedResponseSurface) {
+        const competingSurfaceStatus = reacquireFreshFinalShareSurface(activeSurface, {
+          ...options,
+          getDialogs: options.getDialogs,
+          beforeSurfaces: options.shareSurfaceBaselineSnapshots,
+          copySuccessSurface: activeSurface,
+          copyClicked,
+          copySignalObserved
+        });
+        const noFreshVisibleCandidate = !competingSurfaceStatus.ok &&
+          competingSurfaceStatus.retryable === true &&
+          competingSurfaceStatus.candidateCount === 0;
+        if (!noFreshVisibleCandidate) {
+          return {
+            ok: false,
+            stage: "share-dialog",
+            reason: VERIFIED_RESPONSE_SHARE_SURFACE_MISSING
+          };
+        }
+      } else if (hydratedResponseSurface) {
+        const surfaceStatus = await waitForFreshFinalShareSurface(activeSurface, {
+          ...options,
+          getDialogs: options.getDialogs,
+          beforeSurfaces: options.shareSurfaceBaselineSnapshots,
+          runtimeGuard: options.runtimeGuard,
+          phase,
+          validateSurface: validateActiveSurface,
+          copySuccessSurface: copyClicked && copySignalObserved ? activeSurface : null,
+          copyClicked,
+          copySignalObserved
+        });
+        if (!surfaceStatus.ok) return surfaceStatus;
+        activeSurface = surfaceStatus.surface;
+        contextStatus = validateActiveSurface();
+      }
+      if (!contextStatus.ok) return contextStatus;
       return { ok: true };
     };
     try {
       let runtimeStatus = await checkRuntime("share-copy-before-click");
       if (!runtimeStatus.ok) return runtimeStatus;
+      copyButton = findCopyShareLinkButton(activeSurface);
       if (copyButton) {
-        const beforeState = captureCopySuccessState(surface, copyButton, options);
+        const beforeState = captureCopySuccessState(activeSurface, copyButton, options);
         try {
           copyButton.click();
           copyClicked = true;
@@ -3001,7 +5108,7 @@
         if (copyClicked) {
           let signalResult = null;
           try {
-            signalResult = await waitForSuccess(surface, copyButton, {
+            signalResult = await waitForSuccess(activeSurface, copyButton, {
               ...options,
               beforeState,
               timeoutMs: Number.isFinite(options.copySuccessTimeoutMs)
@@ -3009,8 +5116,13 @@
                 : options.timeoutMs
             });
           } catch {}
+          if (signalResult?.ok === false && signalResult?.stage === "share-dialog") {
+            return signalResult;
+          }
           copySignalObserved = signalResult?.ok === true;
-          if (signalResult?.surface) activeSurface = signalResult.surface;
+          if (signalResult?.surface && !isSameNestedShareSurfaceFamily(activeSurface, signalResult.surface)) {
+            activeSurface = signalResult.surface;
+          }
           runtimeStatus = await checkRuntime("share-copy-after-signal");
           if (!runtimeStatus.ok) return runtimeStatus;
           if (copySignalObserved && options.clipboardPermissionGranted === true) {
@@ -3023,6 +5135,8 @@
             }
             const validatedClipboardUrl = validateStrictChatGptShareUrl(clipboardText);
             if (validatedClipboardUrl) {
+              runtimeStatus = await checkRuntime("share-clipboard-after-read");
+              if (!runtimeStatus.ok) return runtimeStatus;
               return { ok: true, url: validatedClipboardUrl, copyClicked, copySignalObserved, source: "clipboard", surface: activeSurface };
             }
           }
@@ -3072,6 +5186,8 @@
         const status = await checkRuntimeGuard(options.runtimeGuard, phase);
         if (!status?.ok) return { ok: false, stage: "runtime", reason: status.error || "runtime unavailable" };
       }
+      const contextStatus = validateShareContextBoundary(options, phase, "share-dialog");
+      if (!contextStatus.ok) return contextStatus;
       return { ok: true };
     };
     try {
@@ -3164,6 +5280,8 @@
     let validatedShareUrl = "";
     let shareInteraction = "";
     let conversationShareActionOccurred = false;
+    let responseCopyClicked = false;
+    let responseCopySignalObserved = false;
     const fail = (stage, reason, details = {}) => ({
       ok: false,
       ...details,
@@ -3235,6 +5353,10 @@
       surfaces: beforeDialogs.filter(item => item.visible).slice(0, 6).map(item => shareSurfaceDiagnostic(item.node))
     });
     if (!isVisibleEnabledControl(shareButton)) return fail("share-button", "share button is not visible or enabled");
+    const beforeShareClickContext = validateShareContextBoundary(options, "share-button", "share-button");
+    if (!beforeShareClickContext.ok) {
+      return fail(beforeShareClickContext.stage, beforeShareClickContext.reason);
+    }
     const triggerBeforeClick = shareElementDiagnostic(shareButton, currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode);
     try {
       shareButton.click();
@@ -3306,6 +5428,7 @@
       shareUrl = copyResult.url;
     }
     let dialog = dialogResult.dialog;
+    let finalSurfaceBaselineSnapshots = beforeDialogs;
     const intermediateShareSurface = dialogResult.kind === "intermediate" ||
       (dialogResult.kind === "surface" && dialogResult.surfaceKind === "intermediate");
     if (intermediateShareSurface) {
@@ -3315,9 +5438,14 @@
         return fail("share-menu", intermediate.ambiguous ? "multiple intermediate share actions were equally eligible" : "an intermediate share action was not found");
       }
       const beforeFinalSurfaces = captureShareSurfaceSnapshots(getDialogs() || []);
+      finalSurfaceBaselineSnapshots = beforeFinalSurfaces;
       if (runtimeGuard?.check) {
         const menuRuntimeStatus = await checkRuntimeGuard(runtimeGuard, "intermediate-share-menu");
         if (!menuRuntimeStatus?.ok) return fail("runtime", menuRuntimeStatus.error || "runtime unavailable");
+      }
+      const beforeMenuClickContext = validateShareContextBoundary(options, "intermediate-share-menu", "share-menu");
+      if (!beforeMenuClickContext.ok) {
+        return fail(beforeMenuClickContext.stage, beforeMenuClickContext.reason);
       }
       try {
         intermediate.control.click();
@@ -3335,6 +5463,34 @@
       }
       if (finalResult.kind && finalResult.kind !== "final") return fail("share-dialog", "a final share surface did not open after the intermediate action");
       dialog = finalResult.dialog;
+    }
+    const validateFinalSurface = (candidate = dialog) => validateShareContextBoundary(
+      options,
+      "final-share-surface",
+      "share-dialog",
+      { shareKind, shareSurface: candidate }
+    );
+    let finalSurfaceContext = validateFinalSurface(dialog);
+    if (!finalSurfaceContext.ok && !isResponseShareSurfaceSelectionFailure(finalSurfaceContext)) {
+      return fail(finalSurfaceContext.stage, finalSurfaceContext.reason);
+    }
+    if (shareKind === "response" && typeof options.validateShareContext === "function") {
+      const surfaceStatus = await waitForFreshFinalShareSurface(dialog, {
+        ...options,
+        getDialogs,
+        beforeSurfaces: finalSurfaceBaselineSnapshots,
+        runtimeGuard,
+        phase: "final-share-surface",
+        validateSurface: validateFinalSurface
+      });
+      if (!surfaceStatus.ok) {
+        return fail(surfaceStatus.stage || "share-dialog", surfaceStatus.reason, surfaceStatus);
+      }
+      dialog = surfaceStatus.surface;
+      finalSurfaceContext = validateFinalSurface(dialog);
+    }
+    if (!finalSurfaceContext.ok) {
+      return fail(finalSurfaceContext.stage, finalSurfaceContext.reason);
     }
     artifactDebugLog("final-share-surface", shareSurfaceDiagnostic(dialog));
     if (!shareUrl) shareUrl = extractValidatedChatGptShareUrl(dialog);
@@ -3361,6 +5517,10 @@
       if (runtimeGuard?.check) {
         const updateRuntimeStatus = await checkRuntimeGuard(runtimeGuard, "share-update");
         if (!updateRuntimeStatus?.ok) return fail("runtime", updateRuntimeStatus.error || "runtime unavailable");
+      }
+      const beforeUpdateClickContext = validateShareContextBoundary(options, "share-update", "share-update");
+      if (!beforeUpdateClickContext.ok) {
+        return fail(beforeUpdateClickContext.stage, beforeUpdateClickContext.reason);
       }
       const previousUrl = validateStrictChatGptShareUrl(shareUrl);
       const beforeUpdateSignature = captureShareSurfaceSnapshot(dialog).signature;
@@ -3393,10 +5553,17 @@
     if (!shareUrl) {
       if (hasExistingShareSurfaceStructure(dialog) || copyControlCount > 0 || updateControls.length > 0) {
         shareSource = "existing";
-        const copyResult = await resolveShareUrlFromCopySurface(dialog, options);
+        const copyResult = await resolveShareUrlFromCopySurface(dialog, {
+          ...options,
+          shareKind,
+          getDialogs,
+          shareSurfaceBaselineSnapshots: finalSurfaceBaselineSnapshots
+        });
         if (!copyResult?.ok) {
           return fail(copyResult?.stage || "manual-share-url", copyResult?.reason || "a valid ChatGPT share URL was not provided", copyResult || {});
         }
+        responseCopyClicked = copyResult.copyClicked === true;
+        responseCopySignalObserved = copyResult.copySignalObserved === true;
         if (copyResult.surface) dialog = copyResult.surface;
         shareUrl = copyResult.url;
       } else {
@@ -3405,6 +5572,10 @@
         if (runtimeGuard?.check) {
           const createRuntimeStatus = await checkRuntimeGuard(runtimeGuard, "create-link");
           if (!createRuntimeStatus?.ok) return fail("runtime", createRuntimeStatus.error || "runtime unavailable");
+        }
+        const beforeCreateClickContext = validateShareContextBoundary(options, "create-link", "create-link");
+        if (!beforeCreateClickContext.ok) {
+          return fail(beforeCreateClickContext.stage, beforeCreateClickContext.reason);
         }
         try {
           createButton.click();
@@ -3416,16 +5587,70 @@
         shareCreatedThisAttempt = true;
         const urlResult = await waitForUrl(dialog, { ...options, runtimeGuard, getDialogs });
         if (urlResult?.surface) dialog = urlResult.surface;
+        if (urlResult?.stage === "runtime") {
+          return fail(urlResult.stage, urlResult.reason || "share flow was aborted", urlResult);
+        }
+        if (shareKind === "response" && typeof options.validateShareContext === "function") {
+          let createdSurfaceContext = validateShareContextBoundary(
+            options,
+            "create-link-result",
+            "share-dialog",
+            { shareKind, shareSurface: dialog }
+          );
+          if (!createdSurfaceContext.ok && !isResponseShareSurfaceSelectionFailure(createdSurfaceContext)) {
+            return fail(createdSurfaceContext.stage, createdSurfaceContext.reason);
+          }
+          const validateCreatedSurface = candidate => validateShareContextBoundary(
+            options,
+            "create-link-result",
+            "share-dialog",
+            { shareKind, shareSurface: candidate }
+          );
+          const createdSurfaceStatus = await waitForFreshFinalShareSurface(dialog, {
+            ...options,
+            getDialogs,
+            beforeSurfaces: finalSurfaceBaselineSnapshots,
+            runtimeGuard,
+            phase: "create-link-result",
+            validateSurface: validateCreatedSurface
+          });
+          if (!createdSurfaceStatus.ok) {
+            return fail(createdSurfaceStatus.stage || "share-dialog", createdSurfaceStatus.reason, createdSurfaceStatus);
+          }
+          dialog = createdSurfaceStatus.surface;
+          createdSurfaceContext = validateCreatedSurface(dialog);
+          if (!createdSurfaceContext.ok) {
+            return fail(createdSurfaceContext.stage, createdSurfaceContext.reason);
+          }
+        }
         if (urlResult?.ok) {
-          shareUrl = urlResult.url;
+          const canonicalSurfaceUrl = extractValidatedChatGptShareUrl(dialog);
+          const responseUrlNeedsSurfaceBinding = shareKind === "response" &&
+            typeof options.validateShareContext === "function";
+          if (responseUrlNeedsSurfaceBinding && !canonicalSurfaceUrl) {
+            return fail(
+              "share-url",
+              "Create-link URL did not belong to the verified response Share surface"
+            );
+          }
+          shareUrl = responseUrlNeedsSurfaceBinding
+            ? canonicalSurfaceUrl
+            : canonicalSurfaceUrl || urlResult.url;
         } else {
           if (urlResult?.stage === "runtime" || urlResult?.stage === "share-dialog") {
             return fail(urlResult.stage, urlResult.reason || "share flow was aborted", urlResult);
           }
-          const copyResult = await resolveShareUrlFromCopySurface(dialog, options);
+          const copyResult = await resolveShareUrlFromCopySurface(dialog, {
+            ...options,
+            shareKind,
+            getDialogs,
+            shareSurfaceBaselineSnapshots: finalSurfaceBaselineSnapshots
+          });
           if (!copyResult?.ok) {
             return fail(copyResult?.stage || urlResult?.stage || "share-url", copyResult?.reason || urlResult?.reason || "validated share URL was not found", copyResult || urlResult || {});
           }
+          responseCopyClicked = copyResult.copyClicked === true;
+          responseCopySignalObserved = copyResult.copySignalObserved === true;
           if (copyResult.surface) dialog = copyResult.surface;
           shareUrl = copyResult.url;
         }
@@ -3436,16 +5661,72 @@
     artifactDebugLog("validated-share-url", { validated: true, source: shareSource, kind: shareKind, updated: shareUpdatedThisAttempt });
 
     let dialogClosed = false;
-    const closeButton = findCloseShareDialogButton(dialog);
+    let closeButton = findCloseShareDialogButton(dialog);
     if (closeButton) {
       if (runtimeGuard?.check) {
         const closeRuntimeStatus = await checkRuntimeGuard(runtimeGuard, "share-dialog-close");
         if (!closeRuntimeStatus?.ok) return fail("runtime", closeRuntimeStatus.error || "runtime unavailable");
       }
-      try {
-        closeButton.click();
-        dialogClosed = true;
-      } catch {}
+      const validateCloseSurface = candidate => validateShareContextBoundary(
+        options,
+        "share-dialog-close",
+        "share-dialog",
+        {
+          shareKind,
+          shareSurface: candidate,
+          copyClicked: responseCopyClicked,
+          copySignalObserved: responseCopySignalObserved
+        }
+      );
+      let closeContextStatus = validateCloseSurface(dialog);
+      if (shareKind === "response" && typeof options.validateShareContext === "function") {
+        if (!closeContextStatus.ok && !isResponseShareSurfaceSelectionFailure(closeContextStatus)) {
+          return fail(closeContextStatus.stage, closeContextStatus.reason);
+        }
+        const closeSurfaceOptions = {
+          ...options,
+          getDialogs,
+          beforeSurfaces: finalSurfaceBaselineSnapshots,
+          runtimeGuard,
+          phase: "share-dialog-close",
+          validateSurface: validateCloseSurface,
+          copySuccessSurface: responseCopyClicked && responseCopySignalObserved ? dialog : null,
+          copyClicked: responseCopyClicked,
+          copySignalObserved: responseCopySignalObserved
+        };
+        const verifiedAutoClosedDuringGuard = closeContextStatus.ok &&
+          responseCopyClicked &&
+          responseCopySignalObserved &&
+          (dialog?.isConnected === false || !shareSurfaceVisibilityDetails(dialog).visible);
+        const postGuardSurfaceStatus = verifiedAutoClosedDuringGuard
+          ? reacquireFreshFinalShareSurface(dialog, closeSurfaceOptions)
+          : null;
+        const verifiedClosedWithNoFreshCandidate = verifiedAutoClosedDuringGuard &&
+          !postGuardSurfaceStatus?.ok &&
+          postGuardSurfaceStatus?.retryable === true &&
+          postGuardSurfaceStatus?.candidateCount === 0;
+        if (verifiedClosedWithNoFreshCandidate) {
+          closeButton = null;
+          dialogClosed = true;
+        } else {
+          const closeSurfaceStatus = await waitForFreshFinalShareSurface(dialog, closeSurfaceOptions);
+          if (!closeSurfaceStatus.ok) {
+            return fail(closeSurfaceStatus.stage || "share-dialog", closeSurfaceStatus.reason, closeSurfaceStatus);
+          }
+          dialog = closeSurfaceStatus.surface;
+          closeContextStatus = validateCloseSurface(dialog);
+          closeButton = findCloseShareDialogButton(dialog);
+        }
+      }
+      if (!closeContextStatus.ok) {
+        return fail(closeContextStatus.stage, closeContextStatus.reason);
+      }
+      if (closeButton) {
+        try {
+          closeButton.click();
+          dialogClosed = true;
+        } catch {}
+      }
     }
     return {
       ok: true,
@@ -3573,6 +5854,96 @@
       source: "data-app-block-preview",
       node
     }));
+  }
+
+  const RICH_APP_RUNTIME_HOST_RE = /^app-block-[a-z0-9-]+\.web-sandbox\.oaiusercontent\.com$/i;
+
+  function isStrictRichAppRuntimeIframeUrl(value) {
+    const rawValue = String(value || "").trim();
+    if (!rawValue) return false;
+    try {
+      const parsed = new URL(rawValue);
+      const authorityMatch = rawValue.match(/^https:\/\/([^/?#]*)/i);
+      const rawAuthority = String(authorityMatch?.[1] || "").toLowerCase();
+      const parsedHostname = String(parsed.hostname || "").toLowerCase();
+      return parsed.protocol === "https:"
+        && !parsed.username
+        && !parsed.password
+        && !parsed.port
+        && rawAuthority === parsedHostname
+        && RICH_APP_RUNTIME_HOST_RE.test(parsedHostname);
+    } catch {
+      return false;
+    }
+  }
+
+  function resolveProviderNeutralRichAppEvidence(currentAssistantNode) {
+    const unresolved = (reason, details = {}) => ({
+      ok: false,
+      reason,
+      block: null,
+      iframe: null,
+      blockCount: 0,
+      iframeCount: 0,
+      ...details
+    });
+    if (!currentAssistantNode || roleAttrForNode(currentAssistantNode) !== "assistant") {
+      return unresolved("current node is not an assistant turn");
+    }
+
+    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    if (!currentTurn) return unresolved("current assistant conversation turn was not found");
+    const currentMatches = getVerifiedConversationTurnEntries().filter(entry => entry.turn === currentTurn);
+    if (currentMatches.length !== 1) {
+      return unresolved("current assistant turn is missing or duplicated");
+    }
+    const currentEntry = currentMatches[0];
+    if (currentEntry.ambiguous || currentEntry.role !== "assistant" || currentEntry.node !== currentAssistantNode) {
+      return unresolved("current assistant turn is ambiguous");
+    }
+
+    const blocks = nodesIncludingRoot(currentAssistantNode, '[data-app-block-preview="true"]');
+    if (blocks.length !== 1) {
+      return unresolved("rich app block count is not exactly one", { blockCount: blocks.length });
+    }
+    const block = blocks[0];
+    const blockVisibility = elementVisibilityDetails(block);
+    if (block.hidden === true || /^true$/i.test(String(block.getAttribute?.("aria-hidden") || "")) || !blockVisibility.visible) {
+      return unresolved("rich app block is not connected and visible", { blockCount: 1 });
+    }
+
+    const iframes = Array.from(block.querySelectorAll?.("iframe") || []);
+    if (iframes.length !== 1) {
+      return unresolved("rich app iframe count is not exactly one", {
+        blockCount: 1,
+        iframeCount: iframes.length
+      });
+    }
+    const iframe = iframes[0];
+    const iframeVisibility = elementVisibilityDetails(iframe);
+    if (iframe.hidden === true || /^true$/i.test(String(iframe.getAttribute?.("aria-hidden") || "")) || !iframeVisibility.visible) {
+      return unresolved("rich app iframe is not connected and visible", {
+        blockCount: 1,
+        iframeCount: 1
+      });
+    }
+
+    const iframeUrl = String(iframe.getAttribute?.("src") || "").trim();
+    if (!isStrictRichAppRuntimeIframeUrl(iframeUrl)) {
+      return unresolved("rich app iframe URL is not an allowed runtime URL", {
+        blockCount: 1,
+        iframeCount: 1
+      });
+    }
+
+    return {
+      ok: true,
+      reason: "",
+      block,
+      iframe,
+      blockCount: 1,
+      iframeCount: 1
+    };
   }
 
   function collectRichArtifactCandidatesForStoredNote(currentAssistantNode, { previousQa = null, usePreviousQaForHtml = false } = {}) {
@@ -6784,7 +9155,7 @@
     for (let i = idx - 1; i >= 0; i--) {
       const el = nodes[i];
       if (getMessageRole(el) === "user") {
-        return cleanQuestionText(messageNodeToPlainText(el));
+        return questionNodeToPlainText(el);
       }
     }
     return "";
@@ -6795,7 +9166,7 @@
   }
 
   function requestVisualizeShareConsent({ requestPermission = requestClipboardReadPermission, consentMode = "visualize" } = {}) {
-    const isRichAppContinuation = consentMode === "rich-app-continuation";
+    const isProviderNeutralRichApp = consentMode === "rich-app-continuation" || consentMode === "previous-qa-rich-app";
     const isConversationShare = consentMode === "conversation";
     return new Promise(resolve => {
       let host = null;
@@ -6871,14 +9242,14 @@
         shadow.querySelector("#gpt2obs-consent-title").textContent = t(
           isConversationShare
             ? "conversationShareConsentTitle"
-            : isRichAppContinuation
+            : isProviderNeutralRichApp
               ? "richAppConsentTitle"
               : "visualizeConsentTitle"
         );
         shadow.querySelector("[data-gpt2obs-consent-body]").textContent = t(
           isConversationShare
             ? "conversationShareConfirm"
-            : isRichAppContinuation
+            : isProviderNeutralRichApp
               ? "richAppShareConfirm"
               : "visualizeShareConfirm"
         );
@@ -7016,7 +9387,7 @@
   function visualizeShareFailureMessage(result, mode = "") {
     const failureKey = mode === "conversation"
       ? "conversationShareFailedPrefix"
-      : mode === "rich-app-continuation"
+      : mode === "rich-app-continuation" || mode === "previous-qa-rich-app"
         ? "richAppShareFailedPrefix"
         : "visualizeShareFailedPrefix";
     return formatI18nTemplate(t(failureKey), {
@@ -7125,7 +9496,7 @@
       }
     }
     const effectiveShareKind = resolvedSharePlan?.kind === "conversation" ? "conversation" : "response";
-    const effectivePreviousQa = effectiveMode === "previous-qa"
+    const effectivePreviousQa = effectiveMode === "previous-qa" || effectiveMode === "previous-qa-rich-app"
       ? (previousQa || visualizeContext || null)
       : null;
     const targetTurnId = String(preflight.targetTurnId || currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']")?.getAttribute?.("data-turn-id") || "").trim();
@@ -7158,6 +9529,59 @@
     state.activeSaves.add(preSaveKey);
     let saveSucceeded = false;
     let saveAttempted = false;
+    let verifiedHydratedA2ShareRelocation = false;
+    let verifiedHydratedA2ShareSurface = null;
+    const validateHydratedShareContext = (phase = "", boundaryContext = {}) => {
+      if (!visualizeContext?.hydratedFromVirtualizedTurns) return { ok: true };
+      const shareSurface = boundaryContext?.shareSurface || null;
+      const responseSurfaceTransition = !!shareSurface &&
+        boundaryContext?.shareKind === "response" &&
+        phase !== "share-button";
+      const verifiedPostCopyClosedSurface = responseSurfaceTransition &&
+        !!verifiedHydratedA2ShareSurface &&
+        shareSurface === verifiedHydratedA2ShareSurface &&
+        (shareSurface?.isConnected === false || !shareSurfaceVisibilityDetails(shareSurface).visible) &&
+        boundaryContext?.copyClicked === true &&
+        boundaryContext?.copySignalObserved === true;
+      const visibleCopySuccessSurface = responseSurfaceTransition &&
+        shareSurface?.isConnected !== false &&
+        shareSurfaceVisibilityDetails(shareSurface).visible &&
+        !isCurrentVisibleFinalShareSurface(shareSurface) &&
+        boundaryContext?.copyClicked === true &&
+        boundaryContext?.copySignalObserved === true;
+      const a2ShareTransition = responseSurfaceTransition
+        ? verifiedPostCopyClosedSurface
+          ? verifiedHydratedA2ShareRelocation
+            ? { mode: "verified", shareKind: "response" }
+            : null
+          : visibleCopySuccessSurface
+            ? {
+              mode: "copy-success-surface",
+              shareKind: "response",
+              surface: shareSurface,
+              copyClicked: true,
+              copySignalObserved: true
+            }
+            : { mode: "surface", shareKind: "response", surface: shareSurface }
+        : verifiedHydratedA2ShareRelocation
+          ? { mode: "verified", shareKind: "response" }
+          : null;
+      const status = revalidateHydratedVisualizeContext(
+        currentAssistantNode,
+        visualizeContext,
+        {
+          root: shareOptions.root || document,
+          a2ShareTransition
+        }
+      );
+      if (status?.ok && responseSurfaceTransition) {
+        verifiedHydratedA2ShareSurface = shareSurface;
+        if (status.a2ShareRelocationVerified === true) {
+          verifiedHydratedA2ShareRelocation = true;
+        }
+      }
+      return status;
+    };
     try {
       if (!preflightOverall.complete) {
         const allowPartial = confirmIncompleteCaptureSave(preflightOverall, confirmFn);
@@ -7167,20 +9591,153 @@
       }
 
       let consentResult;
+      let consentBoundaryFailure = null;
+      let deferredHydrationRecovery = false;
+      const guardedClipboardPermissionRequest = () => {
+        const runtimeSyncStatus = runtimeGuard?.checkSync
+          ? runtimeGuard.checkSync("visualize-consent-permission")
+          : { ok: true };
+        if (!runtimeSyncStatus?.ok) {
+          consentBoundaryFailure = {
+            ok: false,
+            stage: "runtime",
+            reason: runtimeSyncStatus.error || "runtime unavailable"
+          };
+          return false;
+        }
+        const hydratedContextStatus = validateHydratedShareContext();
+        if (!hydratedContextStatus.ok) {
+          if (hydratedContextStatus.retryableMissingHydrationWindow === true ||
+              hydratedContextStatus.retryableMissingQ2 === true) {
+            deferredHydrationRecovery = true;
+            return false;
+          }
+          consentBoundaryFailure = {
+            ok: false,
+            stage: "preflight",
+            reason: hydratedContextStatus.reason || "hydrated Visualize context changed before clipboard permission"
+          };
+          return false;
+        }
+        return requestClipboardReadPermissionFn();
+      };
       try {
         consentResult = await requestShareConsentFn({
-          requestPermission: requestClipboardReadPermissionFn,
+          requestPermission: guardedClipboardPermissionRequest,
           consentMode: effectiveShareKind === "conversation" ? "conversation" : effectiveMode
         });
       } catch (error) {
         return showFailure({ ok: false, stage: "share-confirm", reason: error?.message || "Visualize share consent UI failed" });
       }
+      if (consentBoundaryFailure) {
+        return showFailure({
+          ...consentBoundaryFailure,
+          mode: effectiveMode,
+          shareKind: effectiveShareKind
+        });
+      }
       if (consentResult?.approved !== true) {
         return { ok: false, stage: "share-confirm", reason: "user cancelled Visualize share consent" };
       }
-      const clipboardPermissionGranted = consentResult.permissionGranted === true;
+      const clipboardPermissionGranted = deferredHydrationRecovery
+        ? false
+        : consentResult.permissionGranted === true;
       const runtimeStatus = await checkRuntimeGuard(runtimeGuard, "visualize-share-before-click");
       if (!runtimeStatus?.ok) return showFailure({ ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" });
+      let finalHydratedContext = validateHydratedShareContext();
+      if (!finalHydratedContext.ok && (
+        finalHydratedContext.retryableMissingHydrationWindow === true ||
+        finalHydratedContext.retryableMissingQ2 === true ||
+        (deferredHydrationRecovery && finalHydratedContext.verifiedHydrationRemount === true)
+      )) {
+        finalHydratedContext = await recoverHydratedVisualizeMissingQ2(
+          currentAssistantNode,
+          visualizeContext,
+          {
+            root: shareOptions.root || document,
+            runtimeGuard,
+            allowVerifiedHydrationRemount: deferredHydrationRecovery
+          }
+        );
+        if (finalHydratedContext.ok && finalHydratedContext.recoveredQ2 === true && shareCapabilityPreflight) {
+          let refreshedSharePlan;
+          try {
+            refreshedSharePlan = resolveVisualizeShareTriggerPlan(currentAssistantNode, {
+              root: shareOptions.root || document
+            });
+          } catch (error) {
+            refreshedSharePlan = {
+              status: "unavailable",
+              kind: "none",
+              reason: error?.message || "share capability refresh failed after hydrated Q2 recovery"
+            };
+          }
+          const refreshedShareKind = refreshedSharePlan?.kind === "conversation" ? "conversation" : "response";
+          if (refreshedSharePlan?.status !== "found" || !refreshedSharePlan?.control) {
+            finalHydratedContext = {
+              ok: false,
+              reason: refreshedSharePlan?.reason || "share trigger could not be refreshed after hydrated Q2 recovery"
+            };
+          } else if (refreshedShareKind !== effectiveShareKind) {
+            finalHydratedContext = {
+              ok: false,
+              reason: "share scope changed after hydrated Q2 recovery"
+            };
+          } else {
+            resolvedSharePlan = refreshedSharePlan;
+          }
+        }
+      }
+      if (finalHydratedContext.ok && deferredHydrationRecovery &&
+          finalHydratedContext.recoveredQ2 !== true && shareCapabilityPreflight) {
+        let refreshedSharePlan;
+        try {
+          refreshedSharePlan = resolveVisualizeShareTriggerPlan(currentAssistantNode, {
+            root: shareOptions.root || document
+          });
+        } catch (error) {
+          refreshedSharePlan = {
+            status: "unavailable",
+            kind: "none",
+            reason: error?.message || "share capability refresh failed after deferred hydrated Q2 recovery"
+          };
+        }
+        const refreshedShareKind = refreshedSharePlan?.kind === "conversation" ? "conversation" : "response";
+        if (refreshedSharePlan?.status !== "found" || !refreshedSharePlan?.control) {
+          finalHydratedContext = {
+            ok: false,
+            reason: refreshedSharePlan?.reason || "share trigger could not be refreshed after deferred hydrated Q2 recovery"
+          };
+        } else if (refreshedShareKind !== effectiveShareKind) {
+          finalHydratedContext = {
+            ok: false,
+            reason: "share scope changed after deferred hydrated Q2 recovery"
+          };
+        } else {
+          resolvedSharePlan = refreshedSharePlan;
+        }
+      }
+      if (!finalHydratedContext.ok) {
+        return showFailure({
+          ok: false,
+          stage: "preflight",
+          reason: finalHydratedContext.reason || "hydrated Visualize context changed before Share",
+          mode: effectiveMode,
+          shareKind: effectiveShareKind
+        });
+      }
+      if (effectiveMode === "previous-qa-rich-app") {
+        const finalRichAppPreflight = revalidatePreviousQaRichAppContext(currentAssistantNode, visualizeContext);
+        if (!finalRichAppPreflight.ok) {
+          return showFailure({
+            ok: false,
+            stage: "preflight",
+            reason: finalRichAppPreflight.reason || "provider-neutral rich app evidence disappeared before Share",
+            mode: effectiveMode,
+            shareKind: effectiveShareKind
+          });
+        }
+      }
 
       let shareResult;
       try {
@@ -7194,6 +9751,9 @@
           shareRoot: shareOptions.shareRoot || (effectiveShareKind === "conversation"
             ? (shareOptions.root || document)
             : closestArtifactContainer(btn) || currentAssistantNode),
+          validateShareContext: visualizeContext?.hydratedFromVirtualizedTurns
+            ? validateHydratedShareContext
+            : shareOptions.validateShareContext,
           clipboardPermissionGranted
         });
       } catch (error) {
@@ -7277,7 +9837,7 @@
       }
 
       let noteAnswerText = effectivePreviousQa?.answerText || "";
-      if (allowPartialRich && effectiveMode === "previous-qa") {
+      if (allowPartialRich && (effectiveMode === "previous-qa" || effectiveMode === "previous-qa-rich-app")) {
         noteAnswerText = [buildMissingRichArtifactWarning(preflight.localRichIntegrity), noteAnswerText].filter(Boolean).join("\n\n");
       }
       const attachmentNames = finalFileIntegrity.expectedHtmlNames;
@@ -7309,6 +9869,17 @@
           richArtifactsExpected: preflight.richArtifactsExpected,
           richArtifactsRemoteReferenced: preflight.richArtifactsExpected
         })
+        : effectiveMode === "previous-qa-rich-app"
+          ? buildPreviousQaRichAppShareMarkdown({
+            title: preflight.title,
+            sourceUrl,
+            shareUrl: validatedShareUrl,
+            questionText: effectivePreviousQa?.questionText || preflight.questionText || "",
+            answerText: noteAnswerText,
+            attachmentMarker,
+            richArtifactsExpected: preflight.richArtifactsExpected,
+            richArtifactsRemoteReferenced: preflight.richArtifactsExpected
+          })
         : effectiveMode === "rich-app-continuation"
           ? buildRichAppContinuationShareMarkdown({
             title: preflight.title,
@@ -7335,6 +9906,28 @@
         return showFailure({ ok: false, stage: "markdown", reason: "final Visualize share Markdown could not be assembled", shareSource, shareCreatedThisAttempt, validatedShareUrl }, true);
       }
 
+      const beforeNativeRuntime = await checkRuntimeGuard(runtimeGuard, "visualize-native-save");
+      if (!beforeNativeRuntime?.ok) {
+        return showFailure({
+          ok: false,
+          stage: "runtime",
+          reason: beforeNativeRuntime.error || "runtime unavailable",
+          shareSource,
+          shareCreatedThisAttempt,
+          validatedShareUrl
+        }, true);
+      }
+      const beforeNativeContext = validateHydratedShareContext();
+      if (!beforeNativeContext.ok) {
+        return showFailure({
+          ok: false,
+          stage: "preflight",
+          reason: beforeNativeContext.reason || "hydrated Visualize context changed before Native save",
+          shareSource,
+          shareCreatedThisAttempt,
+          validatedShareUrl
+        }, true);
+      }
       saveAttempted = true;
       let saveResponse;
       try {
@@ -7350,7 +9943,13 @@
           allowPartialAttachments,
           htmlSaveDir: settings.htmlSaveDir,
           fallbackUri: ""
-        }, { runtimeGuard, showAlert: alertFn });
+        }, {
+          runtimeGuard,
+          showAlert: alertFn,
+          validateContext: visualizeContext?.hydratedFromVirtualizedTurns
+            ? validateHydratedShareContext
+            : null
+        });
       } catch (error) {
         return showFailure({
           ok: false,
@@ -7364,8 +9963,8 @@
       if (!saveResponse?.ok) {
         return showFailure({
           ok: false,
-          stage: "native-save",
-          reason: saveResponse?.error || "Native helper save failed",
+          stage: saveResponse?.stage || "native-save",
+          reason: saveResponse?.reason || saveResponse?.error || "Native helper save failed",
           shareSource,
           shareCreatedThisAttempt,
           validatedShareUrl
@@ -7418,7 +10017,12 @@
       // the generated-file card receives the originating user click. Every
       // download/native boundary below awaits this same in-flight preflight.
       void runtimeGuard.check("save-start");
-      const currentAssistantNode = closestMessageContainer(btn);
+      let currentAssistantNode = closestMessageContainer(btn);
+      let actionButton = btn;
+      const pendingVisualizeAttemptKey = visualizeAttemptKeyForNode(currentAssistantNode);
+      if (pendingVisualizeAttemptKey && state.activeVisualizeAttempts.has(pendingVisualizeAttemptKey)) {
+        return { ok: false, stage: "duplicate", reason: "Visualize save attempt already in progress" };
+      }
       const richExpected = collectRichAppBlockCandidates(currentAssistantNode);
       const previousQaFinder = options.findPreviousQaPairFn || findPreviousQaPair;
       let previousQaCandidate = null;
@@ -7430,49 +10034,111 @@
       const previousRequest = findPreviousMessageByRole(messageNodes, currentIndex, "user")?.node || previousQaCandidate?.requestNode || null;
       const structuredVisualizeCandidate = isVisualizeShareCandidate(currentAssistantNode, { requestNode: previousRequest });
       if (structuredVisualizeCandidate) {
-        let visualizeContext = null;
-        try { visualizeContext = resolveVisualizeSaveContext(currentAssistantNode); } catch (error) {
-          visualizeContext = { mode: "unresolved", reason: error?.message || "Visualize context resolution failed" };
+        const attemptKey = pendingVisualizeAttemptKey;
+        if (attemptKey && state.activeVisualizeAttempts.has(attemptKey)) {
+          return { ok: false, stage: "duplicate", reason: "Visualize save attempt already in progress" };
         }
-        // Test callers and older integrations may provide an explicit finder
-        // for a detached fixture. Keep that override narrowly scoped; the
-        // production path never falls back from a failed direct resolution to
-        // an unrelated earlier Q/A pair.
-        if (visualizeContext?.mode === "unresolved" && options.findPreviousQaPairFn) {
-          if (!previousQaCandidate) {
-            try { previousQaCandidate = previousQaFinder(currentAssistantNode); } catch {}
+        if (attemptKey) state.activeVisualizeAttempts.add(attemptKey);
+        try {
+          let visualizeContext = null;
+          try {
+            visualizeContext = options.findPreviousQaPairFn
+              ? resolveVisualizeSaveContext(currentAssistantNode)
+              : await resolveVisualizeSaveContextWithHydration(currentAssistantNode, {
+                ...(options.visualizeHydrationOptions || {}),
+                runtimeGuard
+              });
+          } catch (error) {
+            visualizeContext = { mode: "unresolved", reason: error?.message || "Visualize context resolution failed" };
           }
-          if (previousQaCandidate?.questionText && previousQaCandidate?.answerText && previousQaCandidate?.answerNode) {
-            visualizeContext = {
-              mode: "previous-qa",
-              questionNode: previousQaCandidate.questionNode || null,
-              answerNode: previousQaCandidate.answerNode,
-              visualizeRequestNode: previousQaCandidate.requestNode,
-              visualizeAnswerNode: currentAssistantNode,
-              questionText: previousQaCandidate.questionText,
-              answerText: previousQaCandidate.answerText
-            };
+          // Test callers and older integrations may provide an explicit finder
+          // for a detached fixture. Keep that override narrowly scoped; the
+          // production path never falls back from a failed direct resolution to
+          // an unrelated earlier Q/A pair.
+          if (visualizeContext?.mode === "unresolved" && options.findPreviousQaPairFn) {
+            if (!previousQaCandidate) {
+              try { previousQaCandidate = previousQaFinder(currentAssistantNode); } catch {}
+            }
+            if (previousQaCandidate?.questionText && previousQaCandidate?.answerText && previousQaCandidate?.answerNode) {
+              visualizeContext = {
+                mode: "previous-qa",
+                questionNode: previousQaCandidate.questionNode || null,
+                answerNode: previousQaCandidate.answerNode,
+                visualizeRequestNode: previousQaCandidate.requestNode,
+                visualizeAnswerNode: currentAssistantNode,
+                questionText: previousQaCandidate.questionText,
+                answerText: previousQaCandidate.answerText
+              };
+            }
           }
+          if (!visualizeContext || visualizeContext.mode === "unresolved") {
+            const failure = { ok: false, stage: "preflight", reason: visualizeContext?.reason || "Visualize Q1/A1 pair could not be resolved" };
+            if (runtimeGuard?.isAborted?.()) runtimeGuard.notify?.();
+            try { alertFn(visualizeShareFailureMessage(failure)); } catch {}
+            return failure;
+          }
+
+          if (visualizeContext.visualizeAnswerNode) {
+            const answerNodeChanged = visualizeContext.visualizeAnswerNode !== currentAssistantNode;
+            currentAssistantNode = visualizeContext.visualizeAnswerNode;
+            if (answerNodeChanged || visualizeContext.hydratedFromVirtualizedTurns) {
+              const liveButtons = Array.from(currentAssistantNode.querySelectorAll?.(".gpt2obs-btn") || [])
+                .filter(candidate => candidate?.isConnected !== false && currentAssistantNode.contains?.(candidate));
+              actionButton = liveButtons.length === 1 ? liveButtons[0] : currentAssistantNode;
+            }
+          }
+          const resolvedPreviousQa = visualizeContext.mode === "previous-qa"
+            ? {
+              questionNode: visualizeContext.questionNode,
+              answerNode: visualizeContext.answerNode,
+              requestNode: visualizeContext.visualizeRequestNode,
+              questionText: visualizeContext.questionText,
+              answerText: visualizeContext.answerText
+            }
+            : null;
+          return await handleVisualizeShareSave({
+            btn: actionButton,
+            currentAssistantNode,
+            previousQa: resolvedPreviousQa,
+            visualizeContext,
+            runtimeGuard,
+            sourceUrl: location.href,
+            confirmFn,
+            alertFn,
+            preflightFn: options.preflightFn || prepareVisualizeSharePreflight,
+            createShareLinkFn: options.createShareLinkFn || createOrReuseVisualizeShareLink,
+            requestClipboardReadPermissionFn: options.requestClipboardReadPermissionFn || requestClipboardReadPermission,
+            requestShareConsentFn: options.requestShareConsentFn || requestVisualizeShareConsent,
+            requestConversationShareUpdateConsentFn: options.requestConversationShareUpdateConsentFn || requestConversationShareUpdateConsent,
+            shareCapabilityPreflight: typeof options.createShareLinkFn !== "function",
+            preflightOptions: options.preflightOptions || {},
+            shareOptions: options.shareOptions || {},
+            extractDownloadFilesFn: options.extractDownloadFilesFn || extractDownloadFiles,
+            saveObsidianNoteFn: options.saveObsidianNoteFn || saveObsidianNote
+          });
+        } finally {
+          if (attemptKey) state.activeVisualizeAttempts.delete(attemptKey);
         }
-        if (!visualizeContext || visualizeContext.mode === "unresolved") {
-          const failure = { ok: false, stage: "preflight", reason: visualizeContext?.reason || "Visualize Q1/A1 pair could not be resolved" };
-          try { alertFn(visualizeShareFailureMessage(failure)); } catch {}
-          return failure;
-        }
-        const resolvedPreviousQa = visualizeContext.mode === "previous-qa"
-          ? {
-            questionNode: visualizeContext.questionNode,
-            answerNode: visualizeContext.answerNode,
-            requestNode: visualizeContext.visualizeRequestNode,
-            questionText: visualizeContext.questionText,
-            answerText: visualizeContext.answerText
-          }
-          : null;
+      }
+      let previousQaRichAppContext = null;
+      try {
+        previousQaRichAppContext = resolvePreviousQaRichAppSaveContext(currentAssistantNode);
+      } catch (error) {
+        previousQaRichAppContext = { mode: "unresolved", reason: error?.message || "provider-neutral previous-Q&A rich app resolution failed" };
+      }
+      if (previousQaRichAppContext?.mode === "previous-qa-rich-app") {
+        const resolvedPreviousQa = {
+          questionNode: previousQaRichAppContext.questionNode,
+          answerNode: previousQaRichAppContext.answerNode,
+          requestNode: previousQaRichAppContext.requestNode,
+          questionText: previousQaRichAppContext.questionText,
+          answerText: previousQaRichAppContext.answerText
+        };
         return handleVisualizeShareSave({
           btn,
           currentAssistantNode,
           previousQa: resolvedPreviousQa,
-          visualizeContext,
+          visualizeContext: previousQaRichAppContext,
           runtimeGuard,
           sourceUrl: location.href,
           confirmFn,
@@ -7765,7 +10431,16 @@
       closestArtifactContainer,
       findPreviousMessageByRole,
       findPreviousQaPair,
+      questionNodeToPlainText,
+      isPreviousAnswerVisualizationRequestText,
       resolveVisualizeSaveContext,
+      resolveVisualizeSaveContextWithHydration,
+      revalidateHydratedVisualizeContext,
+      recoverHydratedVisualizeMissingQ2,
+      visualizeAttemptKeyForNode,
+      getActiveVisualizeAttemptKeys: () => Array.from(state.activeVisualizeAttempts),
+      resolveConversationScrollContainer,
+      resolvePreviousQaRichAppSaveContext,
       resolveRichAppContinuationContext,
       buildMarkdown,
       buildHtmlLearningMarkdown,
@@ -7778,6 +10453,8 @@
       buildVisualizeShareMarkdown,
       buildConversationShareMarkdown,
       buildDirectVisualizeShareMarkdown,
+      buildPreviousQaRichAppShareMarkdownDraft,
+      buildPreviousQaRichAppShareMarkdown,
       buildRichAppContinuationShareMarkdownDraft,
       buildRichAppContinuationShareMarkdown,
       buildDirectVisualizeShareMarkdownDraft,
@@ -7823,6 +10500,8 @@
       assessArtifactIntegrity,
       confirmPartialArtifactSave,
       collectRichAppBlockCandidates,
+      isStrictRichAppRuntimeIframeUrl,
+      resolveProviderNeutralRichAppEvidence,
       collectRichArtifactCandidatesForStoredNote,
       assessRichArtifactIntegrity,
       combineCaptureIntegrity,

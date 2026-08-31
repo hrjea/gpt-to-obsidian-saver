@@ -1,5 +1,5 @@
 // background.js (service worker)
-const VERSION = "1.5.47";
+const VERSION = "1.5.50";
 const RUNTIME_PING_TYPE = "gpt2obs-runtime-ping";
 const NATIVE_PREFLIGHT_TYPE = "gpt2obs-native-preflight";
 const NATIVE_OBSIDIAN_HOST = "com.gpt_obsidian_saver.open_direct";

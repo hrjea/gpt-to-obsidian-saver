@@ -2,7 +2,7 @@
 
 ## Supported Releases
 
-The latest tagged/public release is `1.5.40`. Security fixes are expected to target the latest supported public release unless a later policy states otherwise. The repository development version is 1.5.47 but is not yet established as a tagged packaged release.
+The latest tagged/public release is `1.5.50`. Security fixes are expected to target the latest supported public release unless a later policy states otherwise.
 
 ## Architecture Summary
 
@@ -13,7 +13,7 @@ GPT to Obsidian Saver is local-first:
 - Obsidian URI mode passes note content to Obsidian through `obsidian://`.
 - Native-helper mode uses Chrome Native Messaging to call a local Python helper.
 
-There is no analytics, telemetry, tracking, developer server, or developer-operated remote storage. Current development has one explicit remote side effect: after separate consent, the extension can operate ChatGPT's visible Share UI and store a strictly validated ChatGPT share URL as an online-only reference. It does not copy the interactive app locally or call a private sharing API.
+There is no analytics, telemetry, tracking, developer server, or developer-operated remote storage. One explicit remote side effect exists: after separate consent, the extension can operate ChatGPT's visible Share UI and store a strictly validated ChatGPT share URL as an online-only reference. It does not copy the interactive app locally or call a private sharing API.
 
 ## Trust Boundaries
 

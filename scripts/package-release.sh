@@ -6,6 +6,16 @@ cd "$ROOT"
 
 ./scripts/validate-release.sh
 
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1 || ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+  echo "Release packaging requires a Git worktree with a committed HEAD" >&2
+  exit 1
+fi
+
+if [ -n "$(git status --porcelain --untracked-files=all -- .)" ]; then
+  echo "Release packaging requires a clean committed worktree" >&2
+  exit 1
+fi
+
 VERSION="$(python3 - <<'PY'
 import json
 from pathlib import Path
@@ -34,7 +44,12 @@ copy_items() {
 }
 
 copy_items "gpt-to-obsidian-saver-v${VERSION}-unpacked-extension.zip" \
-  manifest.json background.js content.js options.html options.js _locales icons
+  manifest.json background.js content.js options.html options.js \
+  _locales/en/messages.json \
+  _locales/ko/messages.json \
+  icons/icon16.png \
+  icons/icon48.png \
+  icons/icon128.png
 
 copy_items "gpt-to-obsidian-saver-v${VERSION}-native-host-macos.zip" \
   native-host/native-open-obsidian.py \
@@ -58,11 +73,7 @@ copy_items "gpt-to-obsidian-saver-v${VERSION}-native-host-windows-experimental.z
   docs/troubleshooting.md \
   LICENSE
 
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git rev-parse --verify HEAD >/dev/null 2>&1; then
-  git archive --format=zip --output="$DIST/gpt-to-obsidian-saver-v${VERSION}-source.zip" HEAD
-else
-  echo "SKIP source archive: Git repository with HEAD is required" >&2
-fi
+git archive --format=zip --output="$DIST/gpt-to-obsidian-saver-v${VERSION}-source.zip" HEAD
 
 inspect_zip() {
   local zipfile="$1"
@@ -82,19 +93,32 @@ inspect_zip() {
   rm -rf "$unpack"
   mkdir -p "$unpack"
   unzip -q "$zipfile" -d "$unpack"
-  local private_user_path="/Users""/jea"
-  local private_extension_id="njcdfcpckkjfnmm""hacfnmdppeikkkhif"
-  local private_vault_name="Obsidian ""Test Vault"
-  if grep -R -n -F "$private_user_path" "$unpack" >/dev/null 2>&1; then
-    echo "Archive contains private user path: $zipfile" >&2
-    return 1
-  fi
-  if grep -R -n -F "$private_extension_id" "$unpack" >/dev/null 2>&1; then
-    echo "Archive contains local extension ID: $zipfile" >&2
-    return 1
-  fi
-  if grep -R -n -F "$private_vault_name" "$unpack" >/dev/null 2>&1; then
-    echo "Archive contains local test vault name: $zipfile" >&2
+  if ! python3 - "$unpack" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+root = Path(sys.argv[1])
+placeholder_users = {"example", "me", "test", "user", "username", "you"}
+mac_user_path_pattern = re.compile(r"(?<![A-Za-z0-9])/(?:Users|home)/(?P<user>[A-Za-z0-9._-]+)")
+windows_user_path_pattern = re.compile(r"(?i)(?:[A-Z]:)?\\+(?:Users)\\+(?P<user>[A-Za-z0-9._-]+)")
+chrome_extension_id_pattern = re.compile(r"(?<![a-p])[a-p]{32}(?![a-p])")
+
+for path in root.rglob("*"):
+    if not path.is_file() or path.suffix.lower() in {".png", ".gif"}:
+        continue
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        continue
+    for pattern in (mac_user_path_pattern, windows_user_path_pattern):
+        if any(match.group("user").lower() not in placeholder_users for match in pattern.finditer(text)):
+            sys.exit(1)
+    if chrome_extension_id_pattern.search(text):
+        sys.exit(1)
+PY
+  then
+    echo "Archive contains a private user path or local Chrome extension ID: $zipfile" >&2
     return 1
   fi
 

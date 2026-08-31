@@ -45,7 +45,7 @@ function loadHooks({ syncState = {} } = {}) {
         lastError: null,
         sendMessage: (message, callback) => callback?.(
           message?.type === "gpt2obs-runtime-ping"
-            ? { ok: true, pong: true, version: "1.5.47" }
+            ? { ok: true, pong: true, version: "1.5.50" }
             : { ok: true }
         )
       }
@@ -382,7 +382,7 @@ function makeHandleCopyFixture(hooks, { rich = true, html = false, outer = "oute
 
 async function main() {
   const hooks = loadHooks();
-  assert.strictEqual(hooks.VERSION, "1.5.47");
+  assert.strictEqual(hooks.VERSION, "1.5.50");
 
   const missingFolderHooks = loadHooks({ syncState: { prefixDate: false } });
   const rootFolderHooks = loadHooks({ syncState: { folderPath: "", prefixDate: false } });

@@ -2,7 +2,7 @@
 
 This document describes the GitHub-only release process. Do not add Chrome Web Store submission steps.
 
-Commands containing v1.5.40 below are historical examples from the latest committed release. Substitute the approved candidate version for a future release; do not assume the current development version has already shipped.
+Commands below show the v1.5.50 release. Substitute the approved candidate version for a future release.
 
 ## 1. Feature Freeze
 
@@ -43,7 +43,6 @@ Check for:
 - Private local paths.
 - Private ChatGPT conversation URLs.
 - Local unpacked extension IDs.
-- Test vault names.
 - Tokens, credentials, logs, screenshots, and caches.
 
 ## 5. Release Candidate
@@ -51,17 +50,17 @@ Check for:
 Create a release commit and annotated RC tag, substituting the approved version:
 
 ```sh
-git commit -m "Release v1.5.40"
-git tag -a v1.5.40-rc.1 -m "Release candidate 1 for v1.5.40"
+git commit -m "Release v1.5.50"
+git tag -a v1.5.50-rc.1 -m "Release candidate 1 for v1.5.50"
 ```
 
 Do not overwrite existing tags.
 
-The candidate tree must be committed and clean before archive generation. Current `scripts/package-release.sh` copies the extension/native archives from the working tree but creates the source archive from `HEAD`; it does not itself reject a dirty tree. Running it with uncommitted changes can produce mismatched archives. This is a documented tooling limitation, not an authorization to alter release history.
+The candidate tree must be committed and clean before archive generation. `scripts/package-release.sh` enforces a Git `HEAD`, rejects tracked or untracked dirty state, builds the source archive from that `HEAD`, and copies extension/runtime assets from explicit file allowlists.
 
 ## 6. Manual Smoke Testing
 
-Use [manual-smoke-test.md](manual-smoke-test.md). Record results in `RELEASE_CHECKLIST.md`.
+Preserve the historical v1.5.40 evidence in [manual-smoke-test.md](manual-smoke-test.md) and `RELEASE_CHECKLIST.md`. For v1.5.50, use [manual-smoke-test-v1.5.50.md](manual-smoke-test-v1.5.50.md) and record results in `RELEASE_CHECKLIST_v1.5.50.md`.
 
 ## 7. Archive Generation
 
@@ -85,11 +84,13 @@ Confirm:
 
 ## 9. Final Tag
 
-Create the final local tag only after required validation and macOS smoke tests pass, substituting the approved version:
+Create the final local tag only after required validation and the release-specific manual gates marked as blocking in the current checklist pass, substituting the approved version:
 
 ```sh
-git tag -a v1.5.40 -m "Release v1.5.40"
+git tag -a v1.5.50 -m "Release v1.5.50"
 ```
+
+A packaged macOS Native installer/uninstaller run is not a blocking gate unless the current version-specific checklist marks it as required. When it is not run, retain `NOT TESTED`; do not alter an existing user installation solely to convert that row to `PASS`.
 
 ## 10. GitHub Publication
 
