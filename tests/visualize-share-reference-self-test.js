@@ -45,7 +45,7 @@ function loadContentHooks() {
         lastError: null,
         sendMessage: (message, callback) => callback?.(
           message?.type === "gpt2obs-runtime-ping"
-            ? { ok: true, pong: true, version: "1.5.50" }
+            ? { ok: true, pong: true, version: "1.5.52" }
             : message?.type === "gpt2obs-native-preflight"
               ? { ok: true, pong: true, native: true }
               : { ok: true }
@@ -378,9 +378,15 @@ function mountConversationWindow(doc, turns) {
   return doc;
 }
 
-function makeConversationTurn(role, text = "", children = [], id = role) {
+function makeConversationTurn(role, text = "", children = [], id = role, {
+  stableTurnId = id,
+  messageId = ""
+} = {}) {
   const roleNode = makeNode({
-    attrs: { "data-message-author-role": role },
+    attrs: {
+      "data-message-author-role": role,
+      ...(messageId ? { "data-message-id": messageId } : {})
+    },
     text,
     children
   });
@@ -389,7 +395,8 @@ function makeConversationTurn(role, text = "", children = [], id = role) {
     attrs: {
       "data-testid": `conversation-turn-${id}`,
       "data-turn": role,
-      "data-turn-id": id
+      ...(stableTurnId ? { "data-turn-id": stableTurnId } : {}),
+      ...(messageId ? { "data-message-id": messageId } : {})
     },
     children: [roleNode]
   });
@@ -609,8 +616,1011 @@ function makeTimerTracker() {
 
  (async () => {
 const hooks = loadContentHooks();
-assert.strictEqual(hooks.VERSION, "1.5.50");
+assert.strictEqual(hooks.VERSION, "1.5.52");
 hooks.setTestLanguage("ko");
+
+// Ordinary supplemental sharing freezes the selected Q/A pair before an
+// awaited Share boundary. Each assertion below names the dangerous change it
+// must catch; the fixture is deliberately a real ordered Q1/A1 turn topology
+// rather than a mocked helper result.
+assert.strictEqual(
+  typeof hooks.captureSupplementalShareTargetProof,
+  "function",
+  "RED: missing proof capture would allow ordinary sharing without a frozen selected pair"
+);
+assert.strictEqual(
+  typeof hooks.revalidateSupplementalShareTargetProof,
+  "function",
+  "RED: missing proof revalidation would allow a later Share boundary to use unproven turns"
+);
+
+function ordinaryQaFixture({
+  questionText = "Q1 selected question",
+  answerText = "A1 selected answer",
+  questionId = "ordinary-q1",
+  answerId = "ordinary-a1",
+  questionMessageId = "",
+  answerMessageId = ""
+} = {}) {
+  const q1Turn = makeConversationTurn("user", questionText, [], questionId || "ordinary-q1-testid", {
+    stableTurnId: questionId,
+    messageId: questionMessageId
+  });
+  const a1Turn = makeConversationTurn("assistant", answerText, [], answerId || "ordinary-a1-testid", {
+    stableTurnId: answerId,
+    messageId: answerMessageId
+  });
+  const document = makeDocument([q1Turn, a1Turn]);
+  return {
+    document,
+    q1Turn,
+    a1Turn,
+    q1: q1Turn.querySelector("[data-message-author-role]"),
+    a1: a1Turn.querySelector("[data-message-author-role]")
+  };
+}
+
+function ordinaryConsecutiveAssistantFixture() {
+  const q = makeConversationTurn("user", "REG018-Q", [], "reg018-q");
+  const a1 = makeConversationTurn("assistant", "REG018-A1-PROVENANCE", [], "reg018-a1");
+  const a2 = makeConversationTurn("assistant", "REG018-A2-PROVENANCE", [], "reg018-a2");
+  const a3 = makeConversationTurn("assistant", "REG018-A3-SELECTED", [], "reg018-a3");
+  return {
+    document: makeDocument([q, a1, a2, a3]),
+    nodes: [q, a1, a2, a3].map(turn => turn.querySelector("[data-message-author-role]"))
+  };
+}
+
+function defaultDiscoveryBarrierTurn(id, declaredRole = "tool") {
+  return makeNode({
+    tagName: "section",
+    attrs: {
+      "data-testid": `conversation-turn-${id}`,
+      ...(declaredRole ? { "data-turn": declaredRole } : {})
+    }
+  });
+}
+
+function messageOnlyRolelessWrapper(id) {
+  return makeNode({
+    tagName: "section",
+    attrs: { "data-message-id": id }
+  });
+}
+
+function nestedMessageWrapper(role, text, id) {
+  const roleNode = makeNode({
+    attrs: { "data-message-author-role": role, "data-message-id": id },
+    text
+  });
+  const wrapper = makeNode({
+    attrs: { "data-message-id": id },
+    children: [roleNode]
+  });
+  return { wrapper, roleNode };
+}
+
+function intermediateMessageScopeTurn(role, text, outerId, messageId) {
+  const roleNode = makeNode({
+    attrs: { "data-message-author-role": role },
+    text
+  });
+  const messageWrapper = makeNode({
+    attrs: { "data-message-id": messageId },
+    children: [roleNode]
+  });
+  const outerTurn = makeNode({
+    tagName: "section",
+    attrs: {
+      "data-testid": `conversation-turn-${outerId}`,
+      "data-turn": role
+    },
+    children: [messageWrapper]
+  });
+  return { outerTurn, messageWrapper, roleNode };
+}
+
+function intermediateMessageScopeFixture() {
+  const q = intermediateMessageScopeTurn("user", "REG018-INTERMEDIATE-Q", "reg018-intermediate-q", "reg018-message-q");
+  const a1 = intermediateMessageScopeTurn("assistant", "REG018-INTERMEDIATE-A1", "reg018-intermediate-a1", "reg018-message-a1");
+  const a2 = intermediateMessageScopeTurn("assistant", "REG018-INTERMEDIATE-A2", "reg018-intermediate-a2", "reg018-message-a2");
+  const a3 = intermediateMessageScopeTurn("assistant", "REG018-INTERMEDIATE-A3", "reg018-intermediate-a3", "reg018-message-a3");
+  return {
+    document: makeDocument([q.outerTurn, a1.outerTurn, a2.outerTurn, a3.outerTurn]),
+    q,
+    a1,
+    a2,
+    a3
+  };
+}
+
+const ordinaryQa = ordinaryQaFixture();
+installDocument(hooks, ordinaryQa.document);
+const ordinaryProofResult = hooks.captureSupplementalShareTargetProof(ordinaryQa.a1, {
+  nodes: [ordinaryQa.q1, ordinaryQa.a1]
+});
+assert.strictEqual(ordinaryProofResult.ok, true, "selected A1 with immediate Q1 must freeze successfully");
+const ordinaryProof = ordinaryProofResult.proof;
+assert.strictEqual(ordinaryProof.targetTurnId, "ordinary-a1");
+assert.strictEqual(ordinaryProof.questionTurnId, "ordinary-q1");
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(ordinaryQa.q1, {
+  nodes: [ordinaryQa.q1, ordinaryQa.a1]
+}).ok, false, "capture must reject a selected user node instead of silently choosing A1");
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(ordinaryQa.a1, {
+  nodes: [ordinaryQa.a1]
+}).ok, false, "capture must reject A1 when its immediate Q1 predecessor is absent");
+const ambiguousCaptureQa = ordinaryQaFixture();
+ambiguousCaptureQa.q1Turn.appendChild(makeNode({
+  attrs: { "data-message-author-role": "user" },
+  text: "duplicate Q1 role"
+}));
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(ambiguousCaptureQa.a1, {
+  nodes: [ambiguousCaptureQa.q1Turn, ambiguousCaptureQa.a1]
+}).ok, false, "capture must reject an immediate predecessor with ambiguous user-role structure");
+const unknownRoleBarrier = makeConversationTurn("tool", "unrecognized role between Q1 and A1", [], "ordinary-unknown-role")
+  .querySelector("[data-message-author-role]");
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(ordinaryQa.a1, {
+  nodes: [ordinaryQa.q1, unknownRoleBarrier, ordinaryQa.a1]
+}).ok, false, "capture must preserve an intervening unknown role as an adjacency barrier");
+const conflictingCaptureQa = ordinaryQaFixture();
+conflictingCaptureQa.a1Turn.setAttribute("data-turn", "user");
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(conflictingCaptureQa.a1, {
+  nodes: [conflictingCaptureQa.q1Turn, conflictingCaptureQa.a1Turn]
+}).ok, false, "capture must reject a selected assistant whose turn container declares a conflicting user role");
+
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(ordinaryProof, {
+  nodes: [ordinaryQa.q1, ordinaryQa.a1],
+  routeKey: ordinaryProof.routeKey
+}).ok, true, "the connected exact Q1/A1 objects remain valid");
+
+const consecutiveAssistants = ordinaryConsecutiveAssistantFixture();
+installDocument(hooks, consecutiveAssistants.document);
+const consecutiveProofResult = hooks.captureSupplementalShareTargetProof(consecutiveAssistants.nodes[3], {
+  nodes: consecutiveAssistants.nodes
+});
+assert.strictEqual(
+  consecutiveProofResult.ok,
+  true,
+  `selected A3 must freeze with its nearest Q across contiguous assistant-only provenance: ${consecutiveProofResult.reason}`
+);
+const consecutiveProof = consecutiveProofResult.proof;
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(consecutiveProof, {
+  nodes: consecutiveAssistants.nodes,
+  routeKey: consecutiveProof.routeKey
+}).ok, true, "an unchanged Q/A1/A2/A3 segment must remain valid through the Share boundary");
+
+for (const { label, declaredRole } of [
+  { label: "tool", declaredRole: "tool" },
+  { label: "unknown", declaredRole: "system" },
+  { label: "role-less", declaredRole: "" }
+]) {
+  const defaultBarrierCapture = ordinaryConsecutiveAssistantFixture();
+  const barrier = defaultDiscoveryBarrierTurn(`reg018-default-${label}`, declaredRole);
+  mountConversationWindow(defaultBarrierCapture.document, [
+    defaultBarrierCapture.nodes[0].parentElement,
+    defaultBarrierCapture.nodes[1].parentElement,
+    barrier,
+    defaultBarrierCapture.nodes[2].parentElement,
+    defaultBarrierCapture.nodes[3].parentElement
+  ]);
+  installDocument(hooks, defaultBarrierCapture.document);
+  const result = hooks.captureSupplementalShareTargetProof(defaultBarrierCapture.nodes[3]);
+  assert.strictEqual(result.ok, false, `default live discovery must reject a ${label} wrapper inside frozen provenance: ${result.reason}`);
+}
+
+for (const { label, declaredRole } of [
+  { label: "tool", declaredRole: "tool" },
+  { label: "unknown", declaredRole: "system" },
+  { label: "role-less", declaredRole: "" }
+]) {
+  const defaultRevalidation = ordinaryConsecutiveAssistantFixture();
+  installDocument(hooks, defaultRevalidation.document);
+  const defaultRevalidationProof = hooks.captureSupplementalShareTargetProof(defaultRevalidation.nodes[3]);
+  assert.strictEqual(defaultRevalidationProof.ok, true, `default live discovery must capture an unbroken Q/A1/A2/A3 segment before ${label} insertion: ${defaultRevalidationProof.reason}`);
+  const barrier = defaultDiscoveryBarrierTurn(`reg018-default-revalidation-${label}`, declaredRole);
+  mountConversationWindow(defaultRevalidation.document, [
+    defaultRevalidation.nodes[0].parentElement,
+    defaultRevalidation.nodes[1].parentElement,
+    barrier,
+    defaultRevalidation.nodes[2].parentElement,
+    defaultRevalidation.nodes[3].parentElement
+  ]);
+  assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(defaultRevalidationProof.proof).ok, false, `default live revalidation must reject an inserted ${label} wrapper`);
+}
+
+const messageOnlyCapture = ordinaryConsecutiveAssistantFixture();
+const messageOnlyBarrier = messageOnlyRolelessWrapper("reg018-message-only-capture");
+mountConversationWindow(messageOnlyCapture.document, [
+  messageOnlyCapture.nodes[0].parentElement,
+  messageOnlyCapture.nodes[1].parentElement,
+  messageOnlyBarrier,
+  messageOnlyCapture.nodes[2].parentElement,
+  messageOnlyCapture.nodes[3].parentElement
+]);
+installDocument(hooks, messageOnlyCapture.document);
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(messageOnlyCapture.nodes[3]).ok, false, "default live discovery must reject a standalone role-less data-message-id wrapper at capture");
+
+const messageOnlyRevalidation = ordinaryConsecutiveAssistantFixture();
+installDocument(hooks, messageOnlyRevalidation.document);
+const messageOnlyProof = hooks.captureSupplementalShareTargetProof(messageOnlyRevalidation.nodes[3]);
+assert.strictEqual(messageOnlyProof.ok, true, `default live discovery must capture before a standalone message-only wrapper is inserted: ${messageOnlyProof.reason}`);
+const messageOnlyInsertedBarrier = messageOnlyRolelessWrapper("reg018-message-only-revalidation");
+mountConversationWindow(messageOnlyRevalidation.document, [
+  messageOnlyRevalidation.nodes[0].parentElement,
+  messageOnlyRevalidation.nodes[1].parentElement,
+  messageOnlyInsertedBarrier,
+  messageOnlyRevalidation.nodes[2].parentElement,
+  messageOnlyRevalidation.nodes[3].parentElement
+]);
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(messageOnlyProof.proof).ok, false, "default live revalidation must reject an inserted standalone role-less data-message-id wrapper");
+
+const selectedIntermediateIdentity = intermediateMessageScopeFixture();
+installDocument(hooks, selectedIntermediateIdentity.document);
+const selectedIntermediateProof = hooks.captureSupplementalShareTargetProof(selectedIntermediateIdentity.a3.roleNode);
+assert.strictEqual(selectedIntermediateProof.ok, true, `an intermediate message scope must capture the selected A3 identity: ${selectedIntermediateProof.reason}`);
+const selectedIntermediateRemount = intermediateMessageScopeFixture();
+installDocument(hooks, selectedIntermediateRemount.document);
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(selectedIntermediateProof.proof).ok, true, "a same-ID/same-content full A3 remount must retain intermediate message-scope identity");
+
+const interveningIntermediateIdentity = intermediateMessageScopeFixture();
+installDocument(hooks, interveningIntermediateIdentity.document);
+const interveningIntermediateProof = hooks.captureSupplementalShareTargetProof(interveningIntermediateIdentity.a3.roleNode);
+assert.strictEqual(interveningIntermediateProof.ok, true, `an intermediate message scope must capture intervening A1 identity: ${interveningIntermediateProof.reason}`);
+const remountedInterveningA1 = intermediateMessageScopeTurn("assistant", "REG018-INTERMEDIATE-A1", "reg018-intermediate-a1-remount", "reg018-message-a1");
+mountConversationWindow(interveningIntermediateIdentity.document, [
+  interveningIntermediateIdentity.q.outerTurn,
+  remountedInterveningA1.outerTurn,
+  interveningIntermediateIdentity.a2.outerTurn,
+  interveningIntermediateIdentity.a3.outerTurn
+]);
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(interveningIntermediateProof.proof).ok, true, "a same-ID/same-content intervening assistant remount must retain intermediate message-scope identity");
+
+const outerUser = makeConversationTurn("user", "REG018-OUTER-Q", [], "reg018-outer-q");
+const innerAssistant = nestedMessageWrapper("assistant", "REG018-INNER-A", "reg018-inner-a");
+const conflictingOuterUser = makeNode({
+  tagName: "section",
+  attrs: {
+    "data-testid": "conversation-turn-reg018-outer-user",
+    "data-turn": "user",
+    "data-turn-id": "reg018-outer-user"
+  },
+  children: [innerAssistant.wrapper]
+});
+const conflictingOuterDocument = makeDocument([outerUser, conflictingOuterUser]);
+installDocument(hooks, conflictingOuterDocument);
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(innerAssistant.roleNode).ok, false, "an outer user turn must not be discarded for an inner assistant message ID");
+
+const nestedQ = makeConversationTurn("user", "REG018-NESTED-Q", [], "reg018-nested-q");
+const nestedA1 = nestedMessageWrapper("assistant", "REG018-NESTED-A1", "reg018-nested-a1");
+const nestedA2 = nestedMessageWrapper("assistant", "REG018-NESTED-A2", "reg018-nested-a2");
+const ambiguousOuterAssistant = makeNode({
+  tagName: "section",
+  attrs: {
+    "data-testid": "conversation-turn-reg018-outer-assistant",
+    "data-turn": "assistant",
+    "data-turn-id": "reg018-outer-assistant"
+  },
+  children: [nestedA1.wrapper, nestedA2.wrapper]
+});
+const nestedA3 = makeConversationTurn("assistant", "REG018-NESTED-A3", [], "reg018-nested-a3");
+const ambiguousOuterDocument = makeDocument([nestedQ, ambiguousOuterAssistant, nestedA3]);
+installDocument(hooks, ambiguousOuterDocument);
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(
+  nestedA3.querySelector("[data-message-author-role]")
+).ok, false, "multiple nested assistant message IDs inside one outer turn must remain ambiguous");
+
+const captureCrossRoleCollision = ordinaryConsecutiveAssistantFixture();
+captureCrossRoleCollision.nodes[0].parentElement.setAttribute("data-turn-id", "reg018-a1");
+installDocument(hooks, captureCrossRoleCollision.document);
+assert.strictEqual(hooks.captureSupplementalShareTargetProof(captureCrossRoleCollision.nodes[3]).ok, false, "capture must reject a user and intervening assistant stable-ID collision across mounted entries");
+
+const crossRoleCollision = ordinaryConsecutiveAssistantFixture();
+installDocument(hooks, crossRoleCollision.document);
+const crossRoleProof = hooks.captureSupplementalShareTargetProof(crossRoleCollision.nodes[3]);
+assert.strictEqual(crossRoleProof.ok, true, `the unmodified Q/A1/A2/A3 segment must capture before mounted-entry collision: ${crossRoleProof.reason}`);
+const unrelatedDuplicateUser = makeConversationTurn("user", "REG018-OUTSIDE-DUPLICATE", [], "reg018-a1");
+mountConversationWindow(crossRoleCollision.document, [
+  unrelatedDuplicateUser,
+  crossRoleCollision.nodes[0].parentElement,
+  crossRoleCollision.nodes[1].parentElement,
+  crossRoleCollision.nodes[2].parentElement,
+  crossRoleCollision.nodes[3].parentElement
+]);
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(crossRoleProof.proof).ok, false, "an intervening stable ID must be unique across all mounted ordered entries, including unrelated roles outside the frozen segment");
+
+const selectedCollisionCapture = ordinaryQaFixture();
+const selectedCollisionUser = makeConversationTurn(
+  "user",
+  "REG018-UNRELATED-SELECTED-ID-COLLISION",
+  [],
+  "ordinary-a1"
+).querySelector("[data-message-author-role]");
+const questionCollisionCapture = ordinaryQaFixture();
+const questionCollisionAssistant = makeConversationTurn(
+  "assistant",
+  "REG018-UNRELATED-QUESTION-ID-COLLISION",
+  [],
+  "ordinary-q1"
+).querySelector("[data-message-author-role]");
+const selectedCollisionRevalidationUser = makeConversationTurn(
+  "user",
+  "REG018-LATE-SELECTED-ID-COLLISION",
+  [],
+  "ordinary-a1"
+).querySelector("[data-message-author-role]");
+const questionCollisionRevalidationAssistant = makeConversationTurn(
+  "assistant",
+  "REG018-LATE-QUESTION-ID-COLLISION",
+  [],
+  "ordinary-q1"
+).querySelector("[data-message-author-role]");
+const idlessQuestionOriginal = ordinaryQaFixture({
+  questionId: "",
+  answerId: "ordinary-idless-question-a1"
+});
+const idlessQuestionProof = hooks.captureSupplementalShareTargetProof(idlessQuestionOriginal.a1, {
+  nodes: [idlessQuestionOriginal.q1, idlessQuestionOriginal.a1]
+}).proof;
+const idlessQuestionReplacementOnly = ordinaryQaFixture({
+  questionId: "",
+  answerId: "ordinary-idless-question-a1"
+});
+const finalReviewIdentityGuardResults = [
+  {
+    label: "capture selected ID cross-role collision",
+    ok: hooks.captureSupplementalShareTargetProof(selectedCollisionCapture.a1, {
+      nodes: [selectedCollisionUser, selectedCollisionCapture.q1, selectedCollisionCapture.a1]
+    }).ok
+  },
+  {
+    label: "capture question ID global collision",
+    ok: hooks.captureSupplementalShareTargetProof(questionCollisionCapture.a1, {
+      nodes: [questionCollisionAssistant, questionCollisionCapture.q1, questionCollisionCapture.a1]
+    }).ok
+  },
+  {
+    label: "revalidate selected ID cross-role collision",
+    ok: hooks.revalidateSupplementalShareTargetProof(ordinaryProof, {
+      nodes: [selectedCollisionRevalidationUser, ordinaryQa.q1, ordinaryQa.a1],
+      routeKey: ordinaryProof.routeKey
+    }).ok
+  },
+  {
+    label: "revalidate question ID global collision",
+    ok: hooks.revalidateSupplementalShareTargetProof(ordinaryProof, {
+      nodes: [questionCollisionRevalidationAssistant, ordinaryQa.q1, ordinaryQa.a1],
+      routeKey: ordinaryProof.routeKey
+    }).ok
+  },
+  {
+    label: "revalidate same-text ID-less question replacement only",
+    ok: hooks.revalidateSupplementalShareTargetProof(idlessQuestionProof, {
+      nodes: [idlessQuestionReplacementOnly.q1, idlessQuestionOriginal.a1],
+      routeKey: idlessQuestionProof.routeKey
+    }).ok
+  }
+];
+assert.deepStrictEqual(JSON.parse(JSON.stringify(finalReviewIdentityGuardResults)), [
+  { label: "capture selected ID cross-role collision", ok: false },
+  { label: "capture question ID global collision", ok: false },
+  { label: "revalidate selected ID cross-role collision", ok: false },
+  { label: "revalidate question ID global collision", ok: false },
+  { label: "revalidate same-text ID-less question replacement only", ok: false }
+], "selected/question identities must remain globally unique and an ID-less question must retain its exact original node");
+
+const rejectsConsecutiveProof = (label, nodes) => {
+  assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(consecutiveProof, {
+    nodes,
+    routeKey: consecutiveProof.routeKey
+  }).ok, false, label);
+};
+
+const replacedA3 = ordinaryConsecutiveAssistantFixture();
+replacedA3.nodes[3].parentElement.setAttribute("data-turn-id", "reg018-a3-replaced-after-consent");
+replacedA3.nodes[3].textContent = "REG018-A3-REPLACED";
+replacedA3.nodes[3].innerText = "REG018-A3-REPLACED";
+rejectsConsecutiveProof("a selected A3 replacement after consent must stop before Share", replacedA3.nodes);
+
+const insertedAssistant = ordinaryConsecutiveAssistantFixture();
+const insertedAssistantNode = makeConversationTurn("assistant", "REG018-A-INSERTED", [], "reg018-inserted")
+  .querySelector("[data-message-author-role]");
+rejectsConsecutiveProof("an inserted assistant must change the frozen provenance segment", [
+  insertedAssistant.nodes[0],
+  insertedAssistant.nodes[1],
+  insertedAssistantNode,
+  insertedAssistant.nodes[2],
+  insertedAssistant.nodes[3]
+]);
+
+const reorderedAssistants = ordinaryConsecutiveAssistantFixture();
+rejectsConsecutiveProof("reordered A1/A2 provenance must stop before Share", [
+  reorderedAssistants.nodes[0],
+  reorderedAssistants.nodes[2],
+  reorderedAssistants.nodes[1],
+  reorderedAssistants.nodes[3]
+]);
+const removedA1 = ordinaryConsecutiveAssistantFixture();
+rejectsConsecutiveProof("removing A1 provenance must stop before Share", [
+  removedA1.nodes[0],
+  removedA1.nodes[2],
+  removedA1.nodes[3]
+]);
+const removedA2 = ordinaryConsecutiveAssistantFixture();
+rejectsConsecutiveProof("removing A2 provenance must stop before Share", [
+  removedA2.nodes[0],
+  removedA2.nodes[1],
+  removedA2.nodes[3]
+]);
+
+const changedInterveningId = ordinaryConsecutiveAssistantFixture();
+changedInterveningId.nodes[1].parentElement.setAttribute("data-turn-id", "reg018-a1-changed");
+rejectsConsecutiveProof("an intervening stable-ID change must stop before Share", changedInterveningId.nodes);
+const duplicateInterveningId = ordinaryConsecutiveAssistantFixture();
+duplicateInterveningId.nodes[2].parentElement.setAttribute("data-turn-id", "reg018-a1");
+rejectsConsecutiveProof("a duplicate intervening stable ID must remain ambiguous", duplicateInterveningId.nodes);
+const changedInterveningFingerprint = ordinaryConsecutiveAssistantFixture();
+changedInterveningFingerprint.nodes[2].textContent = "REG018-A2-PROVENANCE-CHANGED";
+changedInterveningFingerprint.nodes[2].innerText = "REG018-A2-PROVENANCE-CHANGED";
+rejectsConsecutiveProof("an intervening fingerprint change must stop before Share", changedInterveningFingerprint.nodes);
+
+for (const barrier of [
+  makeConversationTurn("user", "REG018-user-barrier", [], "reg018-user-barrier")
+    .querySelector("[data-message-author-role]"),
+  makeConversationTurn("tool", "REG018-tool-barrier", [], "reg018-tool-barrier")
+    .querySelector("[data-message-author-role]")
+]) {
+  const barrierFixture = ordinaryConsecutiveAssistantFixture();
+  rejectsConsecutiveProof("a user or tool barrier inside provenance must stop before Share", [
+    barrierFixture.nodes[0],
+    barrierFixture.nodes[1],
+    barrier,
+    barrierFixture.nodes[2],
+    barrierFixture.nodes[3]
+  ]);
+}
+const ambiguousBarrier = ordinaryConsecutiveAssistantFixture();
+ambiguousBarrier.nodes[1].parentElement.appendChild(makeNode({
+  attrs: { "data-message-author-role": "assistant" },
+  text: "REG018-AMBIGUOUS-ASSISTANT"
+}));
+rejectsConsecutiveProof("an ambiguous role structure inside provenance must stop before Share", ambiguousBarrier.nodes);
+
+const remountedQa = ordinaryQaFixture();
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(ordinaryProof, {
+  nodes: [remountedQa.q1, remountedQa.a1],
+  routeKey: ordinaryProof.routeKey
+}).ok, true, "one same-ID/same-content React remount is accepted");
+
+const messageIdQa = ordinaryQaFixture({
+  questionId: "",
+  answerId: "",
+  questionMessageId: "ordinary-message-q1",
+  answerMessageId: "ordinary-message-a1"
+});
+const messageIdProofResult = hooks.captureSupplementalShareTargetProof(messageIdQa.a1, {
+  nodes: [messageIdQa.q1, messageIdQa.a1]
+});
+assert.strictEqual(messageIdProofResult.ok, true, "data-message-id must freeze an otherwise ID-less turn");
+const messageIdRemount = ordinaryQaFixture({
+  questionId: "",
+  answerId: "",
+  questionMessageId: "ordinary-message-q1",
+  answerMessageId: "ordinary-message-a1"
+});
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(messageIdProofResult.proof, {
+  nodes: [messageIdRemount.q1, messageIdRemount.a1],
+  routeKey: messageIdProofResult.proof.routeKey
+}).ok, true, "a unique data-message-id remount is accepted");
+
+const rejectsOrdinaryProof = (label, proof = ordinaryProof, options = {}) => {
+  assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(proof, {
+    nodes: [ordinaryQa.q1, ordinaryQa.a1],
+    routeKey: ordinaryProof.routeKey,
+    ...options
+  }).ok, false, label);
+};
+
+rejectsOrdinaryProof("route change must stop before an ordinary Share uses a different conversation", ordinaryProof, {
+  routeKey: `${ordinaryProof.routeKey}?other=conversation`
+});
+
+const changedAssistantId = ordinaryQaFixture({ answerId: "ordinary-a1-replaced" });
+rejectsOrdinaryProof("assistant stable-ID change must reject a replacement answer", ordinaryProof, {
+  nodes: [changedAssistantId.q1, changedAssistantId.a1]
+});
+
+const changedAnswer = ordinaryQaFixture({ answerText: "A1 answer changed after capture" });
+rejectsOrdinaryProof("answer fingerprint change must reject a mutated selected answer", ordinaryProof, {
+  nodes: [changedAnswer.q1, changedAnswer.a1]
+});
+
+const changedQuestion = ordinaryQaFixture({ questionText: "Q1 question changed after capture" });
+rejectsOrdinaryProof("question fingerprint change must reject a mutated immediate predecessor", ordinaryProof, {
+  nodes: [changedQuestion.q1, changedQuestion.a1]
+});
+
+const changedRole = ordinaryQaFixture();
+changedRole.a1.setAttribute("data-message-author-role", "user");
+rejectsOrdinaryProof("assistant role change must reject a same-ID node that is no longer an answer", ordinaryProof, {
+  nodes: [changedRole.q1, changedRole.a1]
+});
+
+const interveningUser = makeConversationTurn("user", "intervening question", [], "ordinary-intervening-q");
+const interveningUserNode = interveningUser.querySelector("[data-message-author-role]");
+rejectsOrdinaryProof("an intervening user must break immediate Q1/A1 adjacency", ordinaryProof, {
+  nodes: [ordinaryQa.q1, interveningUserNode, ordinaryQa.a1]
+});
+
+rejectsOrdinaryProof("an intervening unknown role must remain an adjacency barrier during revalidation", ordinaryProof, {
+  nodes: [ordinaryQa.q1, unknownRoleBarrier, ordinaryQa.a1]
+});
+
+const conflictingRevalidationQa = ordinaryQaFixture();
+conflictingRevalidationQa.a1Turn.setAttribute("data-turn", "user");
+rejectsOrdinaryProof("a remounted assistant with a conflicting container role must not be accepted", ordinaryProof, {
+  nodes: [conflictingRevalidationQa.q1Turn, conflictingRevalidationQa.a1Turn]
+});
+
+rejectsOrdinaryProof("a missing target must not be reacquired by content alone", ordinaryProof, {
+  nodes: [ordinaryQa.q1]
+});
+
+const duplicateTarget = ordinaryQaFixture();
+const duplicateTargetSecond = ordinaryQaFixture().a1;
+rejectsOrdinaryProof("two live assistants with the same stable ID must remain ambiguous", ordinaryProof, {
+  nodes: [duplicateTarget.q1, duplicateTarget.a1, duplicateTargetSecond]
+});
+
+const separateScopeDuplicate = ordinaryQaFixture();
+const separateScopeAssistant = ordinaryQaFixture().a1;
+rejectsOrdinaryProof("a duplicate target outside the selected pair scope must still be rejected", ordinaryProof, {
+  nodes: [separateScopeDuplicate.q1, separateScopeDuplicate.a1, separateScopeAssistant]
+});
+
+const idlessOriginal = ordinaryQaFixture({ questionId: "", answerId: "" });
+const idlessProofResult = hooks.captureSupplementalShareTargetProof(idlessOriginal.a1, {
+  nodes: [idlessOriginal.q1, idlessOriginal.a1]
+});
+assert.strictEqual(idlessProofResult.ok, true, "a connected exact ID-less selected pair may be frozen");
+const idlessProof = idlessProofResult.proof;
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(idlessProof, {
+  nodes: [idlessOriginal.q1, idlessOriginal.a1],
+  routeKey: idlessProof.routeKey
+}).ok, true, "a connected exact ID-less selected pair remains valid");
+const idlessReplacement = ordinaryQaFixture({ questionId: "", answerId: "" });
+assert.strictEqual(hooks.revalidateSupplementalShareTargetProof(idlessProof, {
+  nodes: [idlessReplacement.q1, idlessReplacement.a1],
+  routeKey: idlessProof.routeKey
+}).ok, false, "an ID-less replacement must not be accepted by content alone");
+
+assert.strictEqual(typeof hooks.acquireSupplementalShareLink, "function", "ordinary orchestration must expose its supplemental Share acquisition boundary");
+const supplementalRuntimeGuard = {
+  checkSync: phase => ({ ok: true, phase }),
+  check: async phase => ({ ok: true, phase }),
+  isAborted: () => false,
+  getFailure: () => null
+};
+const supplementalResponseControl = makeNode({ tagName: "button", text: "Share" });
+const supplementalResponsePlan = {
+  status: "found",
+  kind: "response",
+  control: supplementalResponseControl,
+  response: { status: "found", control: supplementalResponseControl },
+  conversation: null,
+  reason: ""
+};
+const supplementalResponseUrl = "https://chatgpt.com/s/synthetic-ordinary-helper-response";
+let supplementalPermissionCalls = 0;
+let supplementalCreateCalls = 0;
+const supplementalResponseResult = await hooks.acquireSupplementalShareLink({
+  currentAssistantNode: ordinaryQa.a1,
+  proof: ordinaryProof,
+  runtimeGuard: supplementalRuntimeGuard,
+  sharePlan: supplementalResponsePlan,
+  root: ordinaryQa.document,
+  nodes: [ordinaryQa.q1, ordinaryQa.a1],
+  routeKey: ordinaryProof.routeKey,
+  requestShareConsentFn: async ({ consentMode, requestPermission }) => {
+    assert.strictEqual(consentMode, "supplemental");
+    const permissionGranted = await Promise.resolve(requestPermission());
+    return { approved: true, permissionGranted };
+  },
+  requestClipboardReadPermissionFn: () => {
+    supplementalPermissionCalls += 1;
+    return Promise.resolve(true);
+  },
+  createSupplementalShareLinkFn: async (assistantNode, options) => {
+    supplementalCreateCalls += 1;
+    assert.strictEqual(assistantNode, ordinaryQa.a1);
+    assert.strictEqual(options.shareKind, "response");
+    assert.strictEqual(options.shareTrigger, supplementalResponseControl);
+    assert.strictEqual(typeof options.validateShareContext, "function");
+    assert.strictEqual(options.validateShareContext("test-boundary").ok, true);
+    assert.strictEqual(options.clipboardPermissionGranted, true);
+    return {
+      ok: true,
+      url: supplementalResponseUrl,
+      validatedShareUrl: supplementalResponseUrl,
+      source: "existing",
+      shareKind: "response",
+      shareInteraction: "dialog",
+      conversationShareActionOccurred: false
+    };
+  }
+});
+assert.strictEqual(supplementalResponseResult.ok, true);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(supplementalResponseResult.supplementalShare)), {
+  shareScope: "response",
+  chatGptShareUrl: supplementalResponseUrl
+});
+assert.deepStrictEqual(JSON.parse(JSON.stringify(supplementalResponseResult.shareState)), {
+  shareKind: "response",
+  shareSource: "existing",
+  shareCreatedThisAttempt: false,
+  shareUpdatedThisAttempt: false,
+  validatedShareUrl: supplementalResponseUrl,
+  shareInteraction: "dialog",
+  conversationShareActionOccurred: false
+});
+assert.strictEqual(supplementalPermissionCalls, 1);
+assert.strictEqual(supplementalCreateCalls, 1);
+
+// ChatGPT disables the already-clicked response Share control while its
+// modal is open for HTML/code-block answers. The selected turn and exact
+// control are still the same, so post-click context validation must not
+// mistake that modal-owned disabled state for a scope change.
+{
+  const modalDisabledQa = ordinaryQaFixture({
+    questionId: "ordinary-modal-disabled-q1",
+    answerId: "ordinary-modal-disabled-a1"
+  });
+  const modalDisabledShare = makeNode({
+    tagName: "button",
+    attrs: { "aria-label": "Share", "data-testid": "conversation-turn-share" },
+    text: "Share"
+  });
+  modalDisabledQa.a1.appendChild(makeNode({
+    attrs: { role: "toolbar", "aria-label": "Response actions" },
+    children: [modalDisabledShare]
+  }));
+  modalDisabledQa.a1.cloneNode = () => makeNode({
+    attrs: { "data-message-author-role": "assistant" },
+    text: "A1 selected answer"
+  });
+  installDocument(hooks, modalDisabledQa.document);
+  const modalDisabledProofResult = hooks.captureSupplementalShareTargetProof(modalDisabledQa.a1, {
+    nodes: [modalDisabledQa.q1, modalDisabledQa.a1]
+  });
+  assert.strictEqual(modalDisabledProofResult.ok, true);
+  const modalDisabledInitialPlan = hooks.resolveChatGptShareTriggerPlan(modalDisabledQa.a1, {
+    root: modalDisabledQa.document
+  });
+  assert.strictEqual(
+    modalDisabledInitialPlan.status,
+    "found",
+    `test fixture must begin with one eligible response Share control: ${modalDisabledInitialPlan.reason || "unknown"}`
+  );
+  let postClickContextStatus = null;
+  let detachedPostClickContextStatus = null;
+  const modalDisabledUrl = "https://chatgpt.com/s/synthetic-ordinary-modal-disabled";
+  const modalDisabledResult = await hooks.acquireSupplementalShareLink({
+    currentAssistantNode: modalDisabledQa.a1,
+    proof: modalDisabledProofResult.proof,
+    runtimeGuard: supplementalRuntimeGuard,
+    root: modalDisabledQa.document,
+    nodes: [modalDisabledQa.q1, modalDisabledQa.a1],
+    routeKey: modalDisabledProofResult.proof.routeKey,
+    resolveSharePlanFn: assistantNode => hooks.resolveChatGptShareTriggerPlan(assistantNode, {
+      root: modalDisabledQa.document
+    }),
+    requestShareConsentFn: async () => ({ approved: true, permissionGranted: false }),
+    createSupplementalShareLinkFn: async (_assistantNode, options) => {
+      modalDisabledShare.disabled = true;
+      postClickContextStatus = options.validateShareContext("final-share-surface", {
+        shareKind: "response",
+        shareSurface: makeNode({ attrs: { role: "dialog" } })
+      });
+      modalDisabledShare.isConnected = false;
+      detachedPostClickContextStatus = options.validateShareContext("final-share-surface", {
+        shareKind: "response",
+        shareSurface: makeNode({ attrs: { role: "dialog" } })
+      });
+      modalDisabledShare.isConnected = true;
+      modalDisabledShare.disabled = false;
+      if (!postClickContextStatus.ok) return postClickContextStatus;
+      return {
+        ok: true,
+        url: modalDisabledUrl,
+        validatedShareUrl: modalDisabledUrl,
+        source: "existing",
+        shareKind: "response",
+        shareInteraction: "dialog"
+      };
+    }
+  });
+  assert.strictEqual(
+    postClickContextStatus?.ok,
+    true,
+    `post-click validation rejected the exact modal-disabled control: ${postClickContextStatus?.reason || "unknown"}`
+  );
+  assert.strictEqual(
+    modalDisabledResult.ok,
+    true,
+    "the exact response Share control may be disabled only after its modal-opening click"
+  );
+  assert.strictEqual(
+    detachedPostClickContextStatus?.ok,
+    false,
+    "a detached approved Share control must remain rejected after the modal-opening click"
+  );
+}
+
+// The modal-disabled exception must not erase ambiguity. A second visible
+// Share-like control in the same response action toolbar remains a competing
+// candidate even when both controls are native-disabled after the click.
+{
+  const ambiguousModalDisabledQa = ordinaryQaFixture({
+    questionId: "ordinary-modal-disabled-ambiguous-q1",
+    answerId: "ordinary-modal-disabled-ambiguous-a1"
+  });
+  const approvedModalDisabledShare = makeNode({
+    tagName: "button",
+    attrs: { "aria-label": "Share", "data-testid": "conversation-turn-share" },
+    text: "Share"
+  });
+  const competingModalDisabledShare = makeNode({
+    tagName: "button",
+    attrs: { "aria-label": "Share", "data-testid": "conversation-turn-share-secondary" },
+    text: "Share"
+  });
+  competingModalDisabledShare.disabled = true;
+  ambiguousModalDisabledQa.a1.appendChild(makeNode({
+    attrs: { role: "toolbar", "aria-label": "Response actions" },
+    children: [approvedModalDisabledShare, competingModalDisabledShare]
+  }));
+  ambiguousModalDisabledQa.a1.cloneNode = () => makeNode({
+    attrs: { "data-message-author-role": "assistant" },
+    text: "A1 selected answer"
+  });
+  installDocument(hooks, ambiguousModalDisabledQa.document);
+  const ambiguousModalDisabledProofResult = hooks.captureSupplementalShareTargetProof(ambiguousModalDisabledQa.a1, {
+    nodes: [ambiguousModalDisabledQa.q1, ambiguousModalDisabledQa.a1]
+  });
+  assert.strictEqual(ambiguousModalDisabledProofResult.ok, true);
+  const ambiguousModalDisabledInitialPlan = hooks.resolveChatGptShareTriggerPlan(ambiguousModalDisabledQa.a1, {
+    root: ambiguousModalDisabledQa.document
+  });
+  assert.strictEqual(
+    ambiguousModalDisabledInitialPlan.status,
+    "found",
+    `pre-click resolution must keep only the one enabled approved control: ${ambiguousModalDisabledInitialPlan.reason || "unknown"}`
+  );
+  assert.strictEqual(ambiguousModalDisabledInitialPlan.control, approvedModalDisabledShare);
+  let ambiguousModalDisabledPostClickStatus = null;
+  const ambiguousModalDisabledResult = await hooks.acquireSupplementalShareLink({
+    currentAssistantNode: ambiguousModalDisabledQa.a1,
+    proof: ambiguousModalDisabledProofResult.proof,
+    runtimeGuard: supplementalRuntimeGuard,
+    root: ambiguousModalDisabledQa.document,
+    nodes: [ambiguousModalDisabledQa.q1, ambiguousModalDisabledQa.a1],
+    routeKey: ambiguousModalDisabledProofResult.proof.routeKey,
+    resolveSharePlanFn: assistantNode => hooks.resolveChatGptShareTriggerPlan(assistantNode, {
+      root: ambiguousModalDisabledQa.document
+    }),
+    requestShareConsentFn: async () => ({ approved: true, permissionGranted: false }),
+    createSupplementalShareLinkFn: async (_assistantNode, options) => {
+      approvedModalDisabledShare.disabled = true;
+      ambiguousModalDisabledPostClickStatus = options.validateShareContext("final-share-surface", {
+        shareKind: "response",
+        shareSurface: makeNode({ attrs: { role: "dialog" } })
+      });
+      return ambiguousModalDisabledPostClickStatus;
+    }
+  });
+  assert.strictEqual(
+    ambiguousModalDisabledPostClickStatus?.ok,
+    false,
+    "two visible modal-disabled response Share controls must remain ambiguous after the click"
+  );
+  assert.strictEqual(
+    ambiguousModalDisabledResult.ok,
+    false,
+    "the supplemental Share attempt must stop when a second disabled response Share control competes"
+  );
+}
+
+async function evaluateAttributeDisabledResponseShare(attributeName, { withCompetitor }) {
+  const qa = ordinaryQaFixture({
+    questionId: `ordinary-${attributeName}-${withCompetitor ? "competitor" : "approved"}-q1`,
+    answerId: `ordinary-${attributeName}-${withCompetitor ? "competitor" : "approved"}-a1`
+  });
+  const approvedShare = makeNode({
+    tagName: "button",
+    attrs: { "aria-label": "Share", "data-testid": "conversation-turn-share" },
+    text: "Share"
+  });
+  const toolbarChildren = [approvedShare];
+  if (withCompetitor) {
+    const competingShare = makeNode({
+      tagName: "button",
+      attrs: {
+        "aria-label": "Share",
+        "data-testid": `conversation-turn-share-${attributeName}`,
+        [attributeName]: "true"
+      },
+      text: "Share"
+    });
+    toolbarChildren.push(competingShare);
+  }
+  qa.a1.appendChild(makeNode({
+    attrs: { role: "toolbar", "aria-label": "Response actions" },
+    children: toolbarChildren
+  }));
+  qa.a1.cloneNode = () => makeNode({
+    attrs: { "data-message-author-role": "assistant" },
+    text: "A1 selected answer"
+  });
+  installDocument(hooks, qa.document);
+  const proofResult = hooks.captureSupplementalShareTargetProof(qa.a1, {
+    nodes: [qa.q1, qa.a1]
+  });
+  assert.strictEqual(proofResult.ok, true);
+  const initialPlan = hooks.resolveChatGptShareTriggerPlan(qa.a1, { root: qa.document });
+  assert.strictEqual(initialPlan.status, "found", `${attributeName} fixture must begin with one enabled approved response Share`);
+  assert.strictEqual(initialPlan.control, approvedShare);
+  let postClickStatus = null;
+  await hooks.acquireSupplementalShareLink({
+    currentAssistantNode: qa.a1,
+    proof: proofResult.proof,
+    runtimeGuard: supplementalRuntimeGuard,
+    root: qa.document,
+    nodes: [qa.q1, qa.a1],
+    routeKey: proofResult.proof.routeKey,
+    resolveSharePlanFn: assistantNode => hooks.resolveChatGptShareTriggerPlan(assistantNode, {
+      root: qa.document
+    }),
+    requestShareConsentFn: async () => ({ approved: true, permissionGranted: false }),
+    createSupplementalShareLinkFn: async (_assistantNode, options) => {
+      if (withCompetitor) {
+        approvedShare.disabled = true;
+      } else {
+        approvedShare.setAttribute(attributeName, "true");
+      }
+      postClickStatus = options.validateShareContext("final-share-surface", {
+        shareKind: "response",
+        shareSurface: makeNode({ attrs: { role: "dialog" } })
+      });
+      return postClickStatus;
+    }
+  });
+  return postClickStatus?.ok === true;
+}
+
+{
+  const attributeDisabledResults = [];
+  for (const attributeName of ["aria-disabled", "data-disabled"]) {
+    attributeDisabledResults.push({
+      attributeName,
+      competitorAccepted: await evaluateAttributeDisabledResponseShare(attributeName, { withCompetitor: true }),
+      soleApprovedAccepted: await evaluateAttributeDisabledResponseShare(attributeName, { withCompetitor: false })
+    });
+  }
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(attributeDisabledResults)), [
+    { attributeName: "aria-disabled", competitorAccepted: false, soleApprovedAccepted: true },
+    { attributeName: "data-disabled", competitorAccepted: false, soleApprovedAccepted: true }
+  ], "aria/data-disabled Share controls must use the same sole-approved-candidate rule as native disabled controls");
+}
+
+const supplementalConversationControl = makeNode({ tagName: "button", text: "Share chat" });
+const supplementalConversationPlan = {
+  status: "found",
+  kind: "conversation",
+  control: supplementalConversationControl,
+  response: { status: "missing", control: null },
+  conversation: { status: "found", control: supplementalConversationControl },
+  reason: ""
+};
+const supplementalConversationUrl = "https://chatgpt.com/s/synthetic-ordinary-helper-conversation";
+const supplementalConversationResult = await hooks.acquireSupplementalShareLink({
+  currentAssistantNode: ordinaryQa.a1,
+  proof: ordinaryProof,
+  runtimeGuard: supplementalRuntimeGuard,
+  sharePlan: supplementalConversationPlan,
+  root: ordinaryQa.document,
+  nodes: [ordinaryQa.q1, ordinaryQa.a1],
+  routeKey: ordinaryProof.routeKey,
+  requestShareConsentFn: async ({ consentMode }) => {
+    assert.strictEqual(consentMode, "supplemental-conversation");
+    return { approved: true, permissionGranted: false };
+  },
+  createSupplementalShareLinkFn: async (_assistantNode, options) => {
+    assert.strictEqual(options.shareKind, "conversation");
+    assert.strictEqual(options.shareTrigger, supplementalConversationControl);
+    return {
+      ok: true,
+      url: supplementalConversationUrl,
+      source: "existing",
+      shareKind: "conversation",
+      shareInteraction: "instant-copy",
+      conversationShareActionOccurred: true,
+      conversationShareFreshness: ""
+    };
+  }
+});
+assert.strictEqual(supplementalConversationResult.ok, true);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(supplementalConversationResult.supplementalShare)), {
+  shareScope: "conversation",
+  conversationShareUrl: supplementalConversationUrl,
+  targetTurnId: "ordinary-a1",
+  shareInteraction: "instant-copy",
+  conversationShareFreshness: "unverified"
+});
+
+{
+  const ambiguousResponseShareA = makeNode({
+    tagName: "button",
+    attrs: { "aria-label": "Share", "data-testid": "share-response" },
+    text: "Share"
+  });
+  const ambiguousResponseShareB = makeNode({
+    tagName: "button",
+    attrs: { "aria-label": "Share", "data-testid": "share-response" },
+    text: "Share"
+  });
+  const responseActions = makeNode({
+    attrs: { role: "group", "aria-label": "Response actions" },
+    children: [ambiguousResponseShareA, ambiguousResponseShareB]
+  });
+  const ambiguousAssistant = makeNode({
+    attrs: { "data-message-author-role": "assistant" },
+    children: [responseActions]
+  });
+  const exactConversationShare = makeNode({
+    tagName: "button",
+    attrs: { "data-testid": "share-chat-button", "aria-label": "Share chat" },
+    text: "Share"
+  });
+  const ambiguityDocument = makeDocument([exactConversationShare, ambiguousAssistant]);
+  const ambiguityPlan = hooks.resolveChatGptShareTriggerPlan(ambiguousAssistant, {
+    root: ambiguityDocument
+  });
+  assert.strictEqual(ambiguityPlan.status, "blocked", "response ambiguity must remain terminal even with one exact header conversation Share");
+  assert.strictEqual(ambiguityPlan.kind, "response");
+  assert.strictEqual(ambiguityPlan.control, null);
+  assert.strictEqual(ambiguityPlan.conversation, null, "the resolver must not inspect conversation fallback after response ambiguity");
+}
+
+let idlessConversationConsentCalls = 0;
+let idlessConversationShareCalls = 0;
+const idlessConversationResult = await hooks.acquireSupplementalShareLink({
+  currentAssistantNode: idlessOriginal.a1,
+  proof: idlessProof,
+  runtimeGuard: supplementalRuntimeGuard,
+  sharePlan: supplementalConversationPlan,
+  root: idlessOriginal.document,
+  nodes: [idlessOriginal.q1, idlessOriginal.a1],
+  routeKey: idlessProof.routeKey,
+  requestShareConsentFn: async () => {
+    idlessConversationConsentCalls += 1;
+    return { approved: true, permissionGranted: false };
+  },
+  createSupplementalShareLinkFn: async () => {
+    idlessConversationShareCalls += 1;
+    return { ok: true, url: supplementalConversationUrl };
+  }
+});
+assert.strictEqual(idlessConversationResult.ok, false, "conversation fallback must reject an ID-less selected answer before consent");
+assert.strictEqual(idlessConversationConsentCalls, 0);
+assert.strictEqual(idlessConversationShareCalls, 0);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(idlessConversationResult.shareState)), {
+  shareKind: "conversation",
+  shareSource: "",
+  shareCreatedThisAttempt: false,
+  shareUpdatedThisAttempt: false,
+  validatedShareUrl: "",
+  shareInteraction: "",
+  conversationShareActionOccurred: false
+});
 
 // Direct Visualize topology must be resolved independently from the legacy
 // findPreviousQaPair() contract. These assertions are intentionally placed
@@ -747,7 +1757,7 @@ assert.strictEqual(typeof hooks.resolveProviderNeutralRichAppEvidence, "function
   );
 }
 
-// Observed title regression: the user message has exactly three children —
+// Live REG-011 title regression: the user message has exactly three children —
 // authored text, one structural Visualize mention, then authored text which may
 // itself contain the word "Visualize". Only the verified structural marker may
 // be removed. Text equality or a generic pill/plugin attribute is insufficient.
@@ -1203,6 +2213,7 @@ assert.strictEqual(typeof hooks.buildPreviousQaRichAppShareMarkdown, "function")
   assert(genericSavedPayload.content.includes("A1 원본 답변"));
   assert(!genericSavedPayload.content.includes("app_provider: visualize"));
   assert(!genericSavedPayload.content.includes("visualize_share_url:"));
+  assert(!genericSavedPayload.content.includes("chatgpt_share_url:"), "provider-neutral app notes must not gain duplicate generic response-share metadata");
   assert.strictEqual(genericSavedPayload.fallbackUri, "");
 
   const genericConversationFixture = makePreviousQaRichAppFixture({
@@ -1258,6 +2269,7 @@ assert.strictEqual(typeof hooks.buildPreviousQaRichAppShareMarkdown, "function")
   assert(genericConversationPayload.content.includes("app_provenance: unverified"));
   assert(!genericConversationPayload.content.includes("app_provider: visualize"));
   assert(!genericConversationPayload.content.includes("visualize_share_url:"));
+  assert(!genericConversationPayload.content.includes("chatgpt_share_url:"), "specialized conversation notes must not gain generic response-share metadata");
   assert.strictEqual(genericConversationPayload.fallbackUri, "");
 
   const disappearingFixture = makePreviousQaRichAppFixture({ q2Text: "preflight 재검증" });
@@ -12227,6 +13239,7 @@ const shareMarkdown = hooks.buildVisualizeShareMarkdown({
 ].forEach(fragment => assert(shareMarkdown.includes(fragment), `share note must contain ${fragment}`));
 assert(!shareMarkdown.includes("Q2"));
 assert(!shareMarkdown.includes("]()"));
+assert(!shareMarkdown.includes("chatgpt_share_url:"), "specialized Visualize Markdown must not gain duplicate generic response-share metadata");
 
 assert.strictEqual(typeof hooks.extractValidatedChatGptShareUrl, "function");
 const existingShareInput = makeNode({ tagName: "input", attrs: { value: "https://chatgpt.com/s/synthetic-t_existing" } });
@@ -12273,8 +13286,21 @@ assert.strictEqual(
   "requestManualVisualizeShareUrl",
   "requestVisualizeShareConsent",
   "waitForValidatedShareUrl",
-  "createOrReuseVisualizeShareLink"
+  "createOrReuseVisualizeShareLink",
+  "resolveChatGptShareTriggerPlan",
+  "createOrReuseChatGptShareLink",
+  "acquireSupplementalShareLink"
 ].forEach(name => assert.strictEqual(typeof hooks[name], "function", `${name} must be exposed`));
+assert.strictEqual(
+  hooks.resolveChatGptShareTriggerPlan,
+  hooks.resolveVisualizeShareTriggerPlan,
+  "generic trigger planning must remain a narrow alias over the mature Share resolver"
+);
+assert.strictEqual(
+  hooks.createOrReuseChatGptShareLink,
+  hooks.createOrReuseVisualizeShareLink,
+  "generic link acquisition must remain a narrow alias over the mature Share machinery"
+);
 const createButton = makeNode({ tagName: "button", text: "Create link" });
 const closeButton = makeNode({ tagName: "button", text: "Close", attrs: { "aria-label": "Close" } });
 const visibleDialog = makeNode({ attrs: { role: "dialog" }, children: [createButton, closeButton] });
@@ -12725,6 +13751,44 @@ for (const invalidManual of [
     assert.strictEqual(keyRemovals, 2);
 
     permissionCalls = 0;
+    const supplementalPromise = hooks.requestVisualizeShareConsent({
+      consentMode: "supplemental",
+      requestPermission: () => {
+        permissionCalls += 1;
+        return Promise.resolve(true);
+      }
+    });
+    assert(titleNode.textContent.includes("ChatGPT"), "ordinary consent must identify a ChatGPT Share link without calling the answer a visualization");
+    assert(bodyNode.textContent.includes("로컬") && bodyNode.textContent.includes("노트"), "ordinary consent must preserve the local-note outcome");
+    assert(bodyNode.textContent.includes("추가") && bodyNode.textContent.includes("공유"), "ordinary consent must describe the supplemental remote link");
+    assert(bodyNode.textContent.includes("클립보드") && bodyNode.textContent.includes("한 번"), "ordinary consent must disclose optional one-shot clipboard reading");
+    assert(bodyNode.textContent.includes("링크를 아는") || bodyNode.textContent.includes("노출"), "ordinary consent must disclose link exposure risk");
+    assert(bodyNode.textContent.includes("노트를 만들지"), "ordinary cancellation copy must promise zero note creation");
+    assert(!bodyNode.textContent.includes("시각화"), "ordinary response consent must not call the selected answer a visualization");
+    cancelHandler({ preventDefault() {} });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(await supplementalPromise)), { approved: false, permissionGranted: false });
+    assert.strictEqual(permissionCalls, 0, "ordinary cancellation must not request clipboard permission");
+    assert.strictEqual(hostRemovals, 3);
+    assert.strictEqual(keyRemovals, 3);
+
+    permissionCalls = 0;
+    const supplementalConversationPromise = hooks.requestVisualizeShareConsent({
+      consentMode: "supplemental-conversation",
+      requestPermission: () => {
+        permissionCalls += 1;
+        return Promise.resolve(true);
+      }
+    });
+    assert(titleNode.textContent.includes("대화"), "ordinary conversation fallback must identify its broader scope");
+    assert(bodyNode.textContent.includes("현재 응답만") && bodyNode.textContent.includes("대화"), "ordinary conversation fallback must disclose broader conversation sharing");
+    assert(!bodyNode.textContent.includes("시각화"), "ordinary conversation consent must not call the selected answer a visualization");
+    cancelHandler({ preventDefault() {} });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(await supplementalConversationPromise)), { approved: false, permissionGranted: false });
+    assert.strictEqual(permissionCalls, 0, "ordinary conversation cancellation must not request permission");
+    assert.strictEqual(hostRemovals, 4);
+    assert.strictEqual(keyRemovals, 4);
+
+    permissionCalls = 0;
     const cancelledPromise = hooks.requestVisualizeShareConsent({
       requestPermission: () => {
         permissionCalls += 1;
@@ -12734,8 +13798,8 @@ for (const invalidManual of [
     keyHandler({ key: "Escape", preventDefault() {} });
     assert.deepStrictEqual(JSON.parse(JSON.stringify(await cancelledPromise)), { approved: false, permissionGranted: false });
     assert.strictEqual(permissionCalls, 0, "Escape cancellation must not request permission");
-    assert.strictEqual(hostRemovals, 3);
-    assert.strictEqual(keyRemovals, 3, "Escape handler must be removed on every exit");
+    assert.strictEqual(hostRemovals, 5);
+    assert.strictEqual(keyRemovals, 5, "Escape handler must be removed on every exit");
     assert.strictEqual(typeof cancelHandler, "function");
   } finally {
     sandboxDocument.createElement = originalCreateElement;

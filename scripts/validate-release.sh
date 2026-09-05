@@ -106,7 +106,7 @@ fi
 required_files=(
   .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml
   .github/ISSUE_TEMPLATE/config.yml .github/PULL_REQUEST_TEMPLATE.md .gitignore
-  CHANGELOG.md CONTRIBUTING.md LICENSE README.md README.ko.md RELEASE_CHECKLIST.md RELEASE_CHECKLIST_v1.5.50.md SECURITY.md
+  CHANGELOG.md CONTRIBUTING.md LICENSE README.md README.ko.md RELEASE_CHECKLIST.md RELEASE_CHECKLIST_v1.5.50.md RELEASE_CHECKLIST_v1.5.52.md SECURITY.md
   _locales/en/messages.json _locales/ko/messages.json
   assets/demo.gif assets/screenshots/01-chatgpt-save-button.png assets/screenshots/03-obsidian-note.png
   assets/screenshots/04-html-attachment.png assets/screenshots/README.md

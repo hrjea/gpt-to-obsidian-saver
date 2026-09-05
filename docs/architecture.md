@@ -1,6 +1,6 @@
 # Architecture
 
-Status: public architecture overview for tagged release v1.5.50.
+Status: public architecture overview for release v1.5.52.
 
 ## System context
 
@@ -12,13 +12,14 @@ ChatGPT page
         -> native-host/native-open-obsidian.py
         -> configured Obsidian vault
 
-ChatGPT page (explicit shared-app save only)
+ChatGPT page (explicit ordinary supplemental or shared-app consent)
   -> content.js -> current response or consented whole-conversation Share UI
   -> validated ChatGPT share URL
-  -> background.js -> Native Messaging -> remote-reference Markdown note
+  -> ordinary: local body + supplemental link -> existing URI or Native route
+  -> shared app: Native Messaging -> remote-reference Markdown note
 ```
 
-There is no developer-operated application server. Ordinary extraction and saving are local. The shared-app path is an explicit exception: it invokes ChatGPT sharing through the visible UI after consent and stores only a strictly validated share URL as a remote reference.
+There is no developer-operated application server. Extraction and note writing are local. Every ordinary save additionally invokes visible ChatGPT Share UI after explicit consent and includes a strict supplemental link. Specialized shared-app notes remain remote references; ordinary notes retain their captured local body.
 
 ## Components and responsibilities
 
@@ -75,10 +76,10 @@ There is no developer-operated application server. Ordinary extraction and savin
 ### 1. Normal Markdown / URI-capable flow
 
 1. User clicks Save on an assistant response.
-2. Content script resolves the current question/answer and converts Markdown.
-3. It builds a note with `title`, `source`, `created`, and tags.
+2. Content script resolves nearest Q and the selected answer; intervening assistant turns are ordered provenance only. It freezes identity, route and content proof and converts only the selected current Q/A.
+3. It prepares a complete draft, obtains explicit Share consent, validates one scoped URL and revalidates target/control/runtime proof before dispatch. Refusal, ambiguity or invalid URL stops with no note. The note retains `title`, `source`, `created`, tags and one supplemental Share section.
 4. An ordinary note without a Native-only artifact is sent through Obsidian URI mode; merely configuring `vaultPath` does not switch this path to a direct Native file write.
-5. The background may use the Native helper to open the URI, and the content script may attempt a direct browser URI if that route fails. Neither path can verify that Obsidian created the file.
+5. The background may use the Native helper to open the URI. Direct fallback requires an explicit `ok: false` opener response plus healthy runtime and unchanged target/control proof; invalid callbacks fail closed. Deferred failure reaches the original Share reporter, warning only for tracked response Create/Update or conversation actions. Neither dispatch acknowledgement nor opener success verifies Vault creation.
 
 ### 2. HTML and generated-file Native flow
 
@@ -138,7 +139,7 @@ The Native helper treats all incoming paths and content metadata as untrusted. I
 
 ### Remote share links
 
-A share URL is not a local copy and may expose content according to ChatGPT policy. The note must state its remote-only and offline-unavailable status. A created or updated link may remain active if later saving fails; the extension warns but does not auto-revoke it.
+A share URL is not a local copy and may expose content according to ChatGPT policy. Specialized remote-reference notes state remote-only and offline-unavailable status. Ordinary notes keep local content and label the URL as supplemental. A created or updated link may remain active if later saving fails; the extension warns but does not auto-revoke it.
 
 ## Integrity and size boundaries
 
@@ -158,3 +159,5 @@ Current public boundaries include a 16 MiB Native message ceiling, at most 100 H
 - Remote references contain only a strictly validated ChatGPT share URL, are online-only, and never claim a local interactive copy.
 - Native writes remain Vault-bounded and return attachment/note audit metadata.
 - Missing or ambiguous message, artifact, Share, or URL candidates fail closed instead of selecting a fallback by similarity.
+
+HTML learning, generated detailed Markdown and approved partial notes also require the ordinary supplemental consent and strict link before their existing Native dispatch. The explicit HTML previous-Q&A option preserves that previous pair and headings; Share still targets the clicked current response. Conversation fallback is missing-only and separately consented, never an ambiguity fallback.

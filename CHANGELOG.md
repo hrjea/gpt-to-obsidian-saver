@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.52] - 2026-09-05
+
+- Add explicitly consented supplemental ChatGPT Share links to ordinary Markdown, HTML learning, detailed Markdown and approved partial notes, preserving local content and URI/Native routing. Declining consent or an invalid/ambiguous target stops without a note.
+- Preserve Q plus only selected A3 across consecutive assistant responses; intermediate answers remain selection evidence and are never merged into the current Q/A body. Keep the explicit HTML previous-Q&A option.
+- Revalidate target identity, provenance, runtime, route and approved Share scope through asynchronous boundaries; preserve existing specialized remote-reference behavior.
+- Report deferred URI failures with the correct response/conversation link persistence warning, without duplicate runtime errors or a new-link warning for existing response-link reuse alone.
+- Add regression coverage for consent, strict URLs, selection identity and deferred URI failure reporting. User reports no issues found in approximate manual checks so far; unperformed live scenarios are not claimed as passing.
+
 ## [1.5.50] - 2026-08-31
 
 - Pair Visualize notes with the intended conversation context: explicit previous-answer requests save Q1/A1, while independent requests and Korean negation forms such as `말고` or `아니라` save Q2/A2.

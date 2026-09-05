@@ -2,7 +2,7 @@
 
 This document describes the GitHub-only release process. Do not add Chrome Web Store submission steps.
 
-Commands below show the v1.5.50 release. Substitute the approved candidate version for a future release.
+Commands below show the historical v1.5.50 release. For v1.5.52 use [the version-specific checklist](../RELEASE_CHECKLIST_v1.5.52.md) and never reuse an existing tag.
 
 ## 1. Feature Freeze
 

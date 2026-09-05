@@ -27,7 +27,13 @@ GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 �
 - 바로 이전 답변을 명시한 Visualize 요청과 독립적인 direct Visualize 요청을 구분하고, turn 또는 Share 증거가 모호하면 중단합니다.
 - 영어/한국어 UI를 제공합니다.
 
-릴리스 1.5.50은 명시적으로 승인한 partial rich-app 노트와 Native-only 원격 참조를 구분하고, provider provenance를 정확히 유지하며, ChatGPT의 가상화·remount turn 및 응답 Share surface를 제한된 범위에서 처리합니다. 현재 동작과 신뢰 경계는 [공개 architecture](docs/architecture.md)를 참고하세요.
+릴리스 1.5.52은 명시적으로 승인한 partial rich-app 노트와 Native-only 원격 참조를 구분하고, provider provenance를 정확히 유지하며, ChatGPT의 가상화·remount turn 및 응답 Share surface를 제한된 범위에서 처리합니다. 현재 동작과 신뢰 경계는 [공개 architecture](docs/architecture.md)를 참고하세요.
+
+## 일반 노트의 보조 Share 동의
+
+일반 저장에도 ChatGPT 보조 공유링크를 위한 명시적 동의가 필요합니다. 동의 거절, URL 검증 실패 또는 대상 모호성이 있으면 저장을 중단하며 링크 없는 노트를 대신 만들지 않습니다. 응답 공유는 선택한 답변을 대상으로 합니다. 응답 공유가 없는 경우에만 별도 동의를 받는 전체 대화 공유를 제공하며 더 넓은 대화 내용이 공개될 수 있습니다. 기존 로컬 Q/A·HTML·상세 Markdown과 URI/Native 저장 경계는 유지합니다.
+
+Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 저장합니다. A1/A2를 합치지 않으며 HTML 이전 Q/A 옵션은 별도로 유지합니다.
 
 ## 지원 플랫폼
 
@@ -41,13 +47,13 @@ GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 �
 
 현재 이 프로젝트는 GitHub Releases를 통해서만 배포되며, Chrome의 Load unpacked 기능으로 설치합니다.
 
-아래에서 설명하는 최신 태그·공개 패키지는 v1.5.50입니다. 설치 전에 릴리스 checksum을 확인하세요.
+아래에서 설명하는 최신 태그·공개 패키지는 v1.5.52입니다. 설치 전에 릴리스 checksum을 확인하세요.
 
 Chrome Web Store에서는 제공되지 않습니다. Chrome Web Store 설치, listing, review, 자동 업데이트 동작을 기대하면 안 됩니다.
 
 ## GitHub Releases에서 설치
 
-1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.50-unpacked-extension.zip`을 다운로드합니다.
+1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.52-unpacked-extension.zip`을 다운로드합니다.
 2. `SHA256SUMS.txt`로 SHA-256 checksum을 확인합니다.
 3. ZIP 파일을 압축 해제합니다.
 4. `chrome://extensions`를 엽니다.
@@ -93,7 +99,7 @@ Native host의 allowed origin은 Chrome에 표시되는 실제 extension ID와 �
 ### macOS Native Helper
 
 1. `chrome://extensions`에서 extension ID를 복사합니다.
-2. `gpt-to-obsidian-saver-v1.5.50-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
+2. `gpt-to-obsidian-saver-v1.5.52-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
 3. 다음을 실행합니다.
 
 ```sh
@@ -188,7 +194,7 @@ PowerShell:
 | `storage` | 언어, vault 이름, 폴더 경로, 기능 toggle 같은 설정 저장 |
 | `nativeMessaging` | 로컬 native helper 호출로 vault 직접 저장 및 HTML 첨부 저장 |
 | `downloads` | 현재 저장 동작에서 예상한 HTML 또는 생성 상세 Markdown 파일을 bounded watch로 식별해, 정확히 일치하는 파일만 로컬 helper가 복사하거나 읽도록 함 |
-| `clipboardRead` (선택적) | 명시적으로 승인한 원격 참조 Share 절차에서만 요청하며, 현재 동작의 엄격한 성공 신호 뒤 새로 복사된 값 하나만 읽을 수 있음. 검증된 ChatGPT 공유 URL만 저장 가능 |
+| `clipboardRead` (선택적) | 명시적으로 승인한 보조 링크 또는 원격 참조 Share 절차에서만 요청하며, 현재 동작의 엄격한 성공 신호 뒤 새로 복사된 값 하나만 읽을 수 있음. 검증된 ChatGPT 공유 URL만 저장 가능 |
 | `https://chatgpt.com/*` | ChatGPT 메시지에 저장 버튼을 주입하고 사용자가 저장을 실행한 메시지를 읽음 |
 | `https://chat.openai.com/*` | 이전 ChatGPT 도메인 지원 |
 
@@ -198,7 +204,7 @@ PowerShell:
 
 확장 프로그램은 사용자가 Save to Obsidian을 클릭했을 때 ChatGPT 페이지 내용을 로컬에서 처리합니다. 설정은 Chrome extension storage에 저장되고, 데이터는 Obsidian URI mode 또는 Chrome Native Messaging을 통해 로컬에 저장됩니다. 분석, telemetry, tracking, 개발자 운영 원격 저장소, 사용자 데이터 판매 기능은 추가하지 않습니다.
 
-확장 프로그램에는 한 가지 명시적 원격 공유 예외가 있습니다. 별도 동의 후 ChatGPT의 화면 Share UI를 조작하고 검증된 ChatGPT 공유 URL을 온라인 전용 참조로 저장할 수 있습니다. Vault 노트나 첨부파일을 개발자 서비스로 업로드하지 않으며, 공유 앱을 로컬 복사본이라고 표시하지 않습니다.
+확장 프로그램에는 명시적 동의를 받는 원격 공유 절차가 있습니다. 일반 노트에는 로컬 본문에 보조 Share 링크를 추가합니다. 별도 동의 후 ChatGPT의 화면 Share UI를 조작하고 검증된 ChatGPT 공유 URL을 온라인 전용 참조로 저장할 수 있습니다. Vault 노트나 첨부파일을 개발자 서비스로 업로드하지 않으며, 공유 앱을 로컬 복사본이라고 표시하지 않습니다.
 
 현재 페이지 URL은 노트 source로 기록될 수 있습니다. Native-helper mode는 설정된 로컬 vault path를 사용해 노트와 첨부파일을 씁니다.
 

@@ -120,8 +120,8 @@ async function main() {
   });
   const { hooks, nodes, storage } = harness;
 
-  assert.strictEqual(hooks.BUILD_VERSION, "1.5.50");
-  assert.strictEqual(hooks.CONTENT_SCRIPT_VERSION, "1.5.50");
+  assert.strictEqual(hooks.BUILD_VERSION, "1.5.52");
+  assert.strictEqual(hooks.CONTENT_SCRIPT_VERSION, "1.5.52");
   assert.strictEqual(hooks.defaultHtmlSaveDir("ChatGPT"), "ChatGPT/Attachments");
   assert.strictEqual(hooks.defaultHtmlSaveDir(""), "Attachments");
   assert.strictEqual(

@@ -4,12 +4,12 @@ This project is distributed through GitHub Releases and installed with Chrome's 
 
 ## Install the Extension
 
-1. Download `gpt-to-obsidian-saver-v1.5.50-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.52-unpacked-extension.zip` from the GitHub Release.
 2. Download `SHA256SUMS.txt`.
 3. Verify the checksum:
 
 ```sh
-shasum -a 256 gpt-to-obsidian-saver-v1.5.50-unpacked-extension.zip
+shasum -a 256 gpt-to-obsidian-saver-v1.5.52-unpacked-extension.zip
 ```
 
 Compare the result with `SHA256SUMS.txt`.
@@ -19,7 +19,7 @@ Compare the result with `SHA256SUMS.txt`.
 6. Enable Developer mode.
 7. Select Load unpacked.
 8. Select the unzipped folder containing `manifest.json`.
-9. Confirm the displayed version is `1.5.50`.
+9. Confirm the displayed version is `1.5.52`.
 
 Chrome may warn about developer-mode extensions because this is an unpacked GitHub installation.
 

@@ -1,7 +1,7 @@
 
-// content.js (1.5.50) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.52) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.50";
+  const VERSION = "1.5.52";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
@@ -48,6 +48,17 @@
       htmlLearningHeading: "HTML Learning Material",
       originalQuestionHeading: "Original Question",
       originalAnswerHeading: "Original Answer",
+      chatGptShareHeading: "ChatGPT Share",
+      responseShareLinkLabel: "Open the shared response in ChatGPT",
+      conversationShareLinkLabel: "Open the shared conversation in ChatGPT",
+      supplementalShareWarningTitle: "Shared ChatGPT content",
+      supplementalShareWarningBody: "This link depends on ChatGPT sharing remaining enabled and accessible.",
+      conversationShareScopeWarningBody: "This link may include conversation content up to the time it was shared, not only the current response.",
+      chatGptShareConsent: "The answer will still be saved as a local Markdown or HTML note. A validated ChatGPT share link will be added as a supplemental remote link.\n\nThe extension will request optional clipboard-read permission. After this attempt's Copy link action shows a fresh Copied confirmation, it may read the clipboard once only to validate one ChatGPT share URL. The raw clipboard value is not logged or stored separately.\n\nAnyone with the link may be able to view the shared response according to ChatGPT sharing settings.\n\nCancel: do not request permission, click Share, or create any Obsidian note\nContinue: create or reuse the current response Share link, then save the local note with that link",
+      chatGptConversationShareConsent: "The answer will still be saved as a local Markdown or HTML note. Because the current response has no individual Share action, a validated whole-conversation ChatGPT link will be added as a supplemental remote link.\n\nThe extension will request optional clipboard-read permission. After this attempt's Copy link action shows a fresh Copied confirmation, it may read the clipboard once only to validate one ChatGPT share URL. The raw clipboard value is not logged or stored separately.\n\nAnyone with the link may be able to view conversation content up to the share point, not only the current response.\n\nCancel: do not request permission, click Share, or create any Obsidian note\nContinue: share the conversation, then save the local note with that link",
+      chatGptShareConsentTitle: "Save a ChatGPT share link",
+      chatGptShareFailedPrefix: "ChatGPT share save stopped at {stage}: {reason}",
+      chatGptShareCreatedButSaveFailed: "A ChatGPT response share link was created, but the Obsidian note was not saved. The link may remain active. If needed, manage or disable it manually from ChatGPT; the extension will not roll it back automatically.",
       nativeSaveFailedPrefix: "Native helper save failed: ",
       nativeSaveFailedSuffix: "\nThe extension attempted to open the Markdown note through URI mode, but could not verify that Obsidian created it. HTML attachments may not have been saved.",
       nativeSaveNoFallbackSuffix: "\nThe note was not sent through URI mode because the generated Markdown is too large for a reliable URI save.",
@@ -118,6 +129,17 @@
       htmlLearningHeading: "HTML 학습자료",
       originalQuestionHeading: "원본 질문",
       originalAnswerHeading: "원본 답변",
+      chatGptShareHeading: "ChatGPT 공유",
+      responseShareLinkLabel: "ChatGPT에서 공유 응답 열기",
+      conversationShareLinkLabel: "ChatGPT에서 공유 대화 열기",
+      supplementalShareWarningTitle: "ChatGPT 공유 콘텐츠",
+      supplementalShareWarningBody: "이 링크는 ChatGPT 공유 기능이 계속 활성화되고 접근 가능해야 열립니다.",
+      conversationShareScopeWarningBody: "이 링크에는 현재 응답만이 아니라 공유 시점까지의 대화 내용이 포함될 수 있습니다.",
+      chatGptShareConsent: "답변은 계속 로컬 Markdown 또는 HTML 노트로 저장하고, 검증된 ChatGPT 공유링크를 추가 원격 링크로 함께 넣습니다.\n\n선택 권한인 클립보드 읽기 권한을 요청합니다. 이번 시도의 '링크 복사' 동작 뒤 새 '복사됨' 표시가 확인된 경우에만 클립보드를 한 번 읽어 ChatGPT 공유 URL 하나인지 검증합니다. 원본 클립보드 값은 로그나 별도 저장소에 기록하지 않습니다.\n\nChatGPT 공유 설정에 따라 링크를 아는 사람이 공유된 응답을 볼 수 있습니다.\n\n취소: 권한을 요청하거나 공유 버튼을 누르지 않고 Obsidian 노트를 만들지 않음\n계속: 현재 응답 공유링크를 생성하거나 재사용한 뒤 로컬 노트에 링크를 함께 저장",
+      chatGptConversationShareConsent: "답변은 계속 로컬 Markdown 또는 HTML 노트로 저장하고, 현재 응답에 개별 공유 동작이 없으므로 검증된 ChatGPT 전체 대화 공유링크를 추가 원격 링크로 함께 넣습니다.\n\n선택 권한인 클립보드 읽기 권한을 요청합니다. 이번 시도의 '링크 복사' 동작 뒤 새 '복사됨' 표시가 확인된 경우에만 클립보드를 한 번 읽어 ChatGPT 공유 URL 하나인지 검증합니다. 원본 클립보드 값은 로그나 별도 저장소에 기록하지 않습니다.\n\n링크를 아는 사람은 현재 응답만이 아니라 공유 시점까지의 대화 내용을 볼 수 있습니다.\n\n취소: 권한을 요청하거나 공유 버튼을 누르지 않고 Obsidian 노트를 만들지 않음\n계속: 전체 대화를 공유한 뒤 로컬 노트에 링크를 함께 저장",
+      chatGptShareConsentTitle: "ChatGPT 공유링크 저장",
+      chatGptShareFailedPrefix: "ChatGPT 공유 저장이 {stage} 단계에서 중단되었습니다: {reason}",
+      chatGptShareCreatedButSaveFailed: "ChatGPT 응답 공유링크는 생성됐지만 Obsidian 노트는 저장되지 않았습니다. 링크는 계속 활성 상태일 수 있습니다. 필요하면 ChatGPT에서 직접 공유를 관리하거나 해제하세요. 확장 프로그램은 자동으로 되돌리지 않습니다.",
       nativeSaveFailedPrefix: "Native helper 저장 실패: ",
       nativeSaveFailedSuffix: "\nMarkdown 노트를 URI mode로 열도록 시도했지만 Obsidian이 실제 파일을 생성했는지는 확인할 수 없습니다. HTML 첨부파일은 저장되지 않았을 수 있습니다.",
       nativeSaveNoFallbackSuffix: "\n생성된 Markdown이 URI로 안정적으로 저장하기에는 너무 커서 URI mode로 다시 보내지 않았습니다.",
@@ -352,7 +374,82 @@
     ];
   }
 
-  function buildMarkdown({title, questionText, answerText, url, attachmentMarker = "", captureMetadata = null}) {
+  function supplementalShareMetadata({
+    shareUrl = "",
+    shareScope = "response",
+    targetTurnId = "",
+    shareInteraction = "",
+    conversationShareFreshness = ""
+  } = {}) {
+    const normalizedUrl = validateStrictChatGptShareUrl(shareUrl);
+    if (!normalizedUrl) return null;
+    if (shareScope === "response") {
+      return { shareScope: "response", chatGptShareUrl: normalizedUrl };
+    }
+    if (shareScope !== "conversation" || !String(targetTurnId || "").trim()) return null;
+    const metadata = {
+      shareScope: "conversation",
+      conversationShareUrl: normalizedUrl,
+      targetTurnId: String(targetTurnId).trim()
+    };
+    if (shareInteraction === "dialog" || shareInteraction === "instant-copy") metadata.shareInteraction = shareInteraction;
+    if (conversationShareFreshness === "verified" || conversationShareFreshness === "unverified") metadata.conversationShareFreshness = conversationShareFreshness;
+    return metadata;
+  }
+
+  function canonicalSupplementalShareForRendering(metadata) {
+    if (!metadata || (metadata.shareScope !== "response" && metadata.shareScope !== "conversation")) return null;
+    const keys = Object.keys(metadata);
+    const allowedKeys = metadata.shareScope === "response"
+      ? ["shareScope", "chatGptShareUrl"]
+      : ["shareScope", "conversationShareUrl", "targetTurnId", "shareInteraction", "conversationShareFreshness"];
+    if (keys.some(key => !allowedKeys.includes(key))) return null;
+    const shareUrl = metadata.shareScope === "response" ? metadata.chatGptShareUrl : metadata.conversationShareUrl;
+    return supplementalShareMetadata({
+      shareUrl,
+      shareScope: metadata.shareScope,
+      targetTurnId: metadata.targetTurnId,
+      shareInteraction: metadata.shareInteraction,
+      conversationShareFreshness: metadata.conversationShareFreshness
+    });
+  }
+
+  function supplementalShareFrontmatterLines(metadata = null) {
+    const canonical = canonicalSupplementalShareForRendering(metadata);
+    if (!canonical) return [];
+    if (canonical.shareScope === "response") {
+      return [`chatgpt_share_url: ${yamlQuote(canonical.chatGptShareUrl)}`, "share_scope: response"];
+    }
+    if (canonical.shareScope === "conversation") {
+      return [
+        `conversation_share_url: ${yamlQuote(canonical.conversationShareUrl)}`,
+        "share_scope: conversation",
+        `target_turn_id: ${yamlQuote(canonical.targetTurnId)}`,
+        ...(canonical.shareInteraction ? [`share_interaction: ${canonical.shareInteraction}`] : []),
+        ...(canonical.conversationShareFreshness ? [`conversation_share_freshness: ${canonical.conversationShareFreshness}`] : [])
+      ];
+    }
+    return [];
+  }
+
+  function supplementalShareBodyLines(metadata = null) {
+    const canonical = canonicalSupplementalShareForRendering(metadata);
+    if (!canonical) return [];
+    const shareUrl = canonical.shareScope === "conversation" ? canonical.conversationShareUrl : canonical.chatGptShareUrl;
+    const label = canonical.shareScope === "conversation" ? t("conversationShareLinkLabel") : t("responseShareLinkLabel");
+    const warningBody = canonical.shareScope === "conversation" ? t("conversationShareScopeWarningBody") : t("supplementalShareWarningBody");
+    return [
+      `# ${t("chatGptShareHeading")}`,
+      "",
+      `[${label}](${shareUrl})`,
+      "",
+      `> [!warning] ${t("supplementalShareWarningTitle")}`,
+      `> ${warningBody}`,
+      ""
+    ];
+  }
+
+  function buildMarkdown({title, questionText, answerText, url, attachmentMarker = "", captureMetadata = null, supplementalShare = null}) {
     const created = nowIso();
     return [
       "---",
@@ -361,10 +458,11 @@
       `created: ${yamlQuote(created)}`,
       "tags: [chatgpt, capture]",
       ...captureMetadataFrontmatterLines(captureMetadata),
+      ...supplementalShareFrontmatterLines(supplementalShare),
       "---",
       "",
-      (settings && settings.bodyTitle ? `# ${title}` : ''),
-      "",
+      ...(settings && settings.bodyTitle ? [`# ${title}`, ""] : []),
+      ...supplementalShareBodyLines(supplementalShare),
       `# ${t("questionHeading")}`,
       "",
       questionText || "",
@@ -376,7 +474,7 @@
     ].join("\n");
   }
 
-  function buildHtmlLearningMarkdown({title, questionText, answerText, url, attachmentMarker = "", useOriginalHeadings = true, captureMetadata = null}) {
+  function buildHtmlLearningMarkdown({title, questionText, answerText, url, attachmentMarker = "", useOriginalHeadings = true, captureMetadata = null, supplementalShare = null}) {
     const created = nowIso();
     const questionHeading = useOriginalHeadings ? t("originalQuestionHeading") : t("questionHeading");
     const answerHeading = useOriginalHeadings ? t("originalAnswerHeading") : t("answerHeading");
@@ -387,12 +485,14 @@
       `created: ${yamlQuote(created)}`,
       "tags: [chatgpt, capture]",
       ...captureMetadataFrontmatterLines(captureMetadata),
+      ...supplementalShareFrontmatterLines(supplementalShare),
       "---",
       ""
     ];
     if (settings && settings.bodyTitle) {
       lines.push(`# ${title}`, "");
     }
+    lines.push(...supplementalShareBodyLines(supplementalShare));
     lines.push(
       `# ${t("htmlLearningHeading")}`,
       "",
@@ -1260,24 +1360,100 @@
     window.location.href = uri;
   }
 
-  function openObsidianURI(uri) {
+  function openObsidianURI(uri, options = {}) {
+    const runtimeGuard = options.runtimeGuard || null;
+    const fallbackPhase = "ordinary-uri-fallback";
+    let failureReported = false;
+    const reportFailure = failure => {
+      if (!failureReported) {
+        failureReported = true;
+        try { options.onFailure?.(failure); } catch (error) {
+          console.warn("Failed to report the Obsidian URI failure.", error);
+        }
+      }
+      return failure;
+    };
+    const recordRuntimeFailure = (error, source) => {
+      const failure = classifyExtensionRuntimeFailure(error, {
+        source,
+        phase: fallbackPhase
+      });
+      let failureAlertShown = false;
+      if (runtimeGuard?.fail) {
+        runtimeGuard.fail(failure, fallbackPhase);
+        failureAlertShown = runtimeGuard.notify?.() === true;
+      } else {
+        try {
+          alert(t("runtimeDisconnectedRefresh"));
+          failureAlertShown = true;
+        } catch {}
+      }
+      return reportFailure({ ...failure, stage: "runtime", failureAlertShown });
+    };
+    const validateDirectFallback = () => {
+      const runtimeStatus = runtimeGuard?.checkSync
+        ? runtimeGuard.checkSync(fallbackPhase)
+        : checkExtensionRuntimeSynchronously(fallbackPhase);
+      if (!runtimeStatus?.ok) {
+        let failureAlertShown = false;
+        if (runtimeGuard?.fail) {
+          runtimeGuard.fail(runtimeStatus, fallbackPhase);
+          failureAlertShown = runtimeGuard.notify?.() === true;
+        }
+        return { ...runtimeStatus, stage: "runtime", failureAlertShown };
+      }
+      return validateShareContextBoundary(
+        { validateShareContext: options.validateContext },
+        fallbackPhase,
+        "preflight"
+      );
+    };
+    const attemptDirectFallback = () => {
+      const boundary = validateDirectFallback();
+      if (!boundary?.ok) {
+        console.warn("Blocked direct Obsidian URI fallback after context changed.", boundary?.reason || boundary?.error || "unknown");
+        reportFailure({ stage: "uri-open", ...boundary });
+        return false;
+      }
+      openObsidianURIDirectly(uri);
+      return true;
+    };
     if (globalThis.chrome?.runtime?.sendMessage) {
       try {
         chrome.runtime.sendMessage({ type: "open-obsidian-uri", uri }, (response) => {
-          const err = globalThis.chrome?.runtime?.lastError;
-          if (err || !response?.ok) {
-            const message = err?.message || response?.error || "unknown";
-            console.warn("Failed to open Obsidian through extension runtime; falling back to direct URI.", message);
-            openObsidianURIDirectly(uri);
+          let err = null;
+          try { err = globalThis.chrome?.runtime?.lastError || null; } catch (error) { err = error; }
+          if (err) {
+            console.warn("Extension runtime became unavailable while opening the Obsidian URI.", err?.message || String(err));
+            recordRuntimeFailure(err, "runtime-last-error");
+            return;
           }
+          if (response?.ok === true) return;
+          const explicitOpenerFailure = Boolean(
+            response
+            && typeof response === "object"
+            && !Array.isArray(response)
+            && response.ok === false
+          );
+          if (!explicitOpenerFailure) {
+            const malformedResponseError = new Error("Native URI opener returned an invalid response");
+            console.warn("Blocked direct Obsidian URI fallback after an invalid Native URI opener response.");
+            recordRuntimeFailure(malformedResponseError, "invalid-response");
+            return;
+          }
+          const message = response.error || "unknown";
+          console.warn("Failed to open Obsidian through the Native URI opener; evaluating direct URI fallback.", message);
+          attemptDirectFallback();
         });
         return;
       } catch (error) {
-        console.warn("Failed to message extension runtime; falling back to direct Obsidian URI.", error);
+        console.warn("Failed to message the extension runtime while opening the Obsidian URI.", error);
+        recordRuntimeFailure(error, "send-exception");
+        return;
       }
     }
 
-    openObsidianURIDirectly(uri);
+    recordRuntimeFailure(t("runtimeUnavailable"), "runtime-missing");
   }
 
   async function saveObsidianNote({vaultName, vaultPath, filePath, content, attachments, downloadedAttachments, downloadedMarkdown, attachmentNames, allowPartialAttachments = false, htmlSaveDir, fallbackUri}, options = {}) {
@@ -1296,6 +1472,35 @@
     };
 
     const fallbackToUri = (message) => {
+      const runtimeStatus = runtimeGuard?.checkSync
+        ? runtimeGuard.checkSync("native-save-fallback")
+        : checkExtensionRuntimeSynchronously("native-save-fallback");
+      const contextStatus = validateShareContextBoundary(
+        { validateShareContext: options.validateContext },
+        "native-save-fallback",
+        "preflight"
+      );
+      if (!runtimeStatus?.ok) {
+        notifyRuntimeFailure(runtimeStatus, "native-save-fallback");
+        return {
+          ...runtimeStatus,
+          ok: false,
+          stage: runtimeStatus.stage || "runtime",
+          reason: runtimeStatus.reason || runtimeStatus.error || "runtime unavailable",
+          nativeAttempted: true,
+          fallbackAttempted: false
+        };
+      }
+      if (!contextStatus.ok) {
+        return {
+          ok: false,
+          stage: contextStatus.stage,
+          error: contextStatus.reason,
+          reason: contextStatus.reason,
+          nativeAttempted: true,
+          fallbackAttempted: false
+        };
+      }
       let fallbackAttempted = false;
       if (fallbackUri) {
         fallbackAttempted = true;
@@ -1306,7 +1511,15 @@
         ? `${t("htmlDownloadCopyFailedWarning")}\n${t("nativeSaveFailedPrefix")}`
         : t("nativeSaveFailedPrefix");
       showAlert(prefix + message + (fallbackAttempted ? t("nativeSaveFailedSuffix") : t("nativeSaveNoFallbackSuffix")));
-      return { ok: false, error: message, fallbackAttempted };
+      return {
+        ok: false,
+        stage: "native-save",
+        error: message,
+        reason: message,
+        nativeAttempted: true,
+        fallbackAttempted,
+        failureAlertShown: true
+      };
     };
 
     const runtimeStatus = runtimeGuard
@@ -1314,7 +1527,7 @@
       : await pingExtensionRuntime("native-save", { sendMessage: sender });
     if (!runtimeStatus?.ok) {
       notifyRuntimeFailure(runtimeStatus, "native-save");
-      return runtimeStatus;
+      return { ...runtimeStatus, nativeAttempted: false, fallbackAttempted: false };
     }
     const contextStatus = validateShareContextBoundary(
       { validateShareContext: options.validateContext },
@@ -1327,6 +1540,7 @@
         stage: contextStatus.stage,
         error: contextStatus.reason,
         reason: contextStatus.reason,
+        nativeAttempted: false,
         fallbackAttempted: false
       };
     }
@@ -1345,7 +1559,7 @@
       if (isExtensionRuntimeFailure(response)) {
         console.warn("Extension runtime became unavailable before native save.", message);
         notifyRuntimeFailure(response, "native-save");
-        return response;
+        return { ...response, nativeAttempted: true, fallbackAttempted: false };
       }
       console.warn("Failed to save Obsidian note through native helper.", message);
       return fallbackToUri(message);
@@ -1367,10 +1581,19 @@
       if (missing.length) {
         const message = t("nativeAttachmentAuditFailed") + missing.slice(0, 12).join(", ");
         showAlert(message);
-        return { ...response, ok: false, error: "native-attachment-audit-incomplete", missingAttachments: missing };
+        return {
+          ...response,
+          ok: false,
+          stage: "native-save",
+          error: "native-attachment-audit-incomplete",
+          nativeAttempted: true,
+          fallbackAttempted: false,
+          failureAlertShown: true,
+          missingAttachments: missing
+        };
       }
     }
-    return response;
+    return { ...response, nativeAttempted: true, fallbackAttempted: false };
   }
 
   function getUserSelection() {
@@ -2273,6 +2496,251 @@
       second = ((second << 5) + second) ^ code;
     }
     return `${text.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
+  }
+
+  // Ordinary Share attempts can cross awaited UI boundaries. Freeze only the
+  // actual ChatGPT turn/message identity when one is available; presentation
+  // attributes and text are evidence, never a remount-capable identity.
+  function supplementalCanonicalTurnScope(candidate) {
+    if (!candidate) return null;
+    const conversationTurn = candidate.closest?.("[data-testid^='conversation-turn-']") || null;
+    if (conversationTurn) return conversationTurn;
+    const declaredTurn = candidate.closest?.("[data-turn]") || null;
+    if (declaredTurn) return declaredTurn;
+    const stableTurn = candidate.closest?.("[data-turn-id]") || null;
+    if (stableTurn) return stableTurn;
+    const messageScopeStart = candidate.matches?.("[data-message-author-role]")
+      ? candidate.parentElement
+      : candidate;
+    return messageScopeStart?.closest?.("[data-message-id]") || candidate;
+  }
+
+  function supplementalStableTurnId(turnScope, node) {
+    const messageScope = node?.closest?.("[data-message-id]") || null;
+    const scopedMessageId = messageScope && turnScope?.contains?.(messageScope)
+      ? messageScope.getAttribute?.("data-message-id")
+      : "";
+    return String(
+      turnScope?.getAttribute?.("data-turn-id") ||
+      turnScope?.getAttribute?.("data-message-id") ||
+      scopedMessageId ||
+      ""
+    ).trim();
+  }
+
+  function supplementalShareEntryForTurnScope(turnScope) {
+    if (!turnScope) return null;
+    const roleNodes = nodesIncludingRoot(turnScope, "[data-message-author-role]");
+    if (!roleNodes.length) {
+      const isCanonicalTurn = turnScope.matches?.(
+        "[data-testid^='conversation-turn-'], [data-turn], [data-turn-id], [data-message-id]"
+      );
+      return isCanonicalTurn ? { node: null, role: "", turnId: "", ambiguous: true } : null;
+    }
+    if (roleNodes.length !== 1) return { node: null, role: "", turnId: "", ambiguous: true };
+    const node = roleNodes[0];
+    const role = roleAttrForNode(node);
+    const declaredRole = String(turnScope.getAttribute?.("data-turn") || "").trim().toLowerCase();
+    if ((role !== "user" && role !== "assistant") ||
+        (declaredRole && (declaredRole !== role || (declaredRole !== "user" && declaredRole !== "assistant")))) {
+      return { node: null, role: "", turnId: "", ambiguous: true };
+    }
+    return {
+      node,
+      role,
+      turnId: supplementalStableTurnId(turnScope, node),
+      ambiguous: false
+    };
+  }
+
+  function supplementalShareEntries(nodes) {
+    const entries = [];
+    const seenTurnScopes = new Set();
+    for (const candidate of Array.isArray(nodes) ? nodes : []) {
+      const turnScope = supplementalCanonicalTurnScope(candidate);
+      if (!turnScope || seenTurnScopes.has(turnScope)) continue;
+      seenTurnScopes.add(turnScope);
+      const entry = supplementalShareEntryForTurnScope(turnScope);
+      if (!entry || (!entry.ambiguous && entries.some(existing => existing.node === entry.node))) continue;
+      entries.push(entry);
+    }
+    return entries;
+  }
+
+  function supplementalQuestionText(node) {
+    return String(questionNodeToPlainText(node) || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function supplementalAssistantText(node) {
+    const rendered = assistantNodeToMarkdown(node);
+    return stripChatGptFooterLines(cleanAnswerText(repairFencedCodeBlocks(
+      rendered || String(node?.innerText || node?.textContent || "")
+    ))).replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function supplementalShareProofEntries(nodes) {
+    if (Array.isArray(nodes)) return supplementalShareEntries(nodes);
+    const root = document.querySelector?.("main") || document.body;
+    const candidates = nodesIncludingRoot(
+      root,
+      "[data-testid^='conversation-turn-'], [data-turn], [data-turn-id], [data-message-id], [data-message-author-role]"
+    );
+    return supplementalShareEntries(candidates);
+  }
+
+  function supplementalConnectedStableIdMatches(entries, turnId) {
+    const stableId = String(turnId || "").trim();
+    if (!stableId) return [];
+    return entries.filter(entry => (
+      !entry?.ambiguous && entry.node?.isConnected === true && entry.turnId === stableId
+    ));
+  }
+
+  function captureSupplementalShareTargetProof(currentAssistantNode, options = {}) {
+    const captureFailure = reason => ({ ok: false, stage: "capture", reason });
+    const routeKey = String(options.routeKey ?? conversationRouteKey()).trim();
+    if (!routeKey) return captureFailure("conversation route is missing");
+    const entries = supplementalShareProofEntries(options.nodes);
+    const currentMatches = entries.filter(entry => entry.node === currentAssistantNode);
+    if (currentMatches.length !== 1 || currentMatches[0].role !== "assistant") {
+      return captureFailure("selected assistant turn is missing or ambiguous");
+    }
+    const selectedEntry = currentMatches[0];
+    if (selectedEntry.turnId &&
+        supplementalConnectedStableIdMatches(entries, selectedEntry.turnId).length !== 1) {
+      return captureFailure("selected assistant stable identity is ambiguous");
+    }
+    const assistantIndex = entries.indexOf(selectedEntry);
+    const interveningAssistants = [];
+    let questionEntry = null;
+    for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (!entry || entry.ambiguous) return captureFailure("selected response topology is ambiguous");
+      if (entry.role === "user") {
+        questionEntry = entry;
+        break;
+      }
+      if (entry.role !== "assistant") {
+        return captureFailure("selected response topology has an unsupported role barrier");
+      }
+      const text = supplementalAssistantText(entry.node);
+      if (!text) return captureFailure("intervening assistant content is empty");
+      if (entry.turnId && supplementalConnectedStableIdMatches(entries, entry.turnId).length !== 1) {
+        return captureFailure("intervening assistant stable identity is ambiguous");
+      }
+      interveningAssistants.unshift(Object.freeze({
+        node: entry.node,
+        turnId: entry.turnId,
+        fingerprint: stableTurnFingerprint(text)
+      }));
+    }
+    if (!questionEntry) return captureFailure("selected assistant has no earlier user predecessor");
+    if (questionEntry.turnId &&
+        supplementalConnectedStableIdMatches(entries, questionEntry.turnId).length !== 1) {
+      return captureFailure("selected question stable identity is ambiguous");
+    }
+    const questionText = supplementalQuestionText(questionEntry.node);
+    const answerText = supplementalAssistantText(selectedEntry.node);
+    if (!questionText || !answerText) {
+      return captureFailure("selected Q&A content is empty");
+    }
+    return {
+      ok: true,
+      proof: Object.freeze({
+        routeKey,
+        assistantNode: selectedEntry.node,
+        questionNode: questionEntry.node,
+        targetTurnId: selectedEntry.turnId,
+        questionTurnId: questionEntry.turnId,
+        assistantFingerprint: stableTurnFingerprint(answerText),
+        questionFingerprint: stableTurnFingerprint(questionText),
+        interveningAssistants: Object.freeze(interveningAssistants)
+      })
+    };
+  }
+
+  function revalidateSupplementalShareTargetProof(proof, options = {}) {
+    if (!proof?.routeKey || !proof?.assistantNode || !proof?.questionNode ||
+        !proof?.assistantFingerprint || !proof?.questionFingerprint ||
+        !Array.isArray(proof?.interveningAssistants)) {
+      return { ok: false, stage: "revalidate", reason: "supplemental Share proof is missing" };
+    }
+    const routeKey = String(options.routeKey ?? conversationRouteKey()).trim();
+    if (!routeKey || routeKey !== proof.routeKey) {
+      return { ok: false, stage: "revalidate", reason: "conversation route changed" };
+    }
+    const entries = supplementalShareProofEntries(options.nodes);
+    const targetTurnId = String(proof.targetTurnId || "").trim();
+    const sameIdEntries = supplementalConnectedStableIdMatches(entries, targetTurnId);
+    if (targetTurnId && sameIdEntries.length !== 1) {
+      return { ok: false, stage: "revalidate", reason: "selected assistant stable identity is missing or ambiguous" };
+    }
+
+    const exactOriginalMatches = entries.filter(entry => entry.node === proof.assistantNode);
+    const exactOriginalConnected = proof.assistantNode.isConnected === true && exactOriginalMatches.length === 1;
+    let assistantEntry = null;
+    if (exactOriginalConnected) {
+      assistantEntry = exactOriginalMatches[0];
+    } else if (targetTurnId) {
+      assistantEntry = sameIdEntries[0] || null;
+    } else {
+      return { ok: false, stage: "revalidate", reason: "ID-less selected assistant was replaced" };
+    }
+    if (!assistantEntry || assistantEntry.role !== "assistant" ||
+        assistantEntry.turnId !== targetTurnId ||
+        stableTurnFingerprint(supplementalAssistantText(assistantEntry.node)) !== proof.assistantFingerprint) {
+      return { ok: false, stage: "revalidate", reason: "selected assistant changed" };
+    }
+
+    const assistantIndex = entries.indexOf(assistantEntry);
+    const expectedQuestionIndex = assistantIndex - proof.interveningAssistants.length - 1;
+    const currentInterveningAssistants = entries.slice(expectedQuestionIndex + 1, assistantIndex);
+    if (expectedQuestionIndex < 0 ||
+        currentInterveningAssistants.length !== proof.interveningAssistants.length) {
+      return { ok: false, stage: "revalidate", reason: "selected response topology changed" };
+    }
+    for (let index = 0; index < proof.interveningAssistants.length; index += 1) {
+      const frozenEntry = proof.interveningAssistants[index];
+      const currentEntry = currentInterveningAssistants[index];
+      if (!frozenEntry?.node || !frozenEntry?.fingerprint ||
+          !currentEntry || currentEntry.ambiguous || currentEntry.role !== "assistant") {
+        return { ok: false, stage: "revalidate", reason: "selected response topology changed" };
+      }
+      const frozenTurnId = String(frozenEntry.turnId || "").trim();
+      if (frozenTurnId) {
+        const interveningIdMatches = supplementalConnectedStableIdMatches(entries, frozenTurnId);
+        if (interveningIdMatches.length !== 1 ||
+            interveningIdMatches[0] !== currentEntry || currentEntry.turnId !== frozenTurnId) {
+          return { ok: false, stage: "revalidate", reason: "intervening assistant stable identity changed" };
+        }
+      } else if (frozenEntry.node.isConnected !== true || currentEntry.node !== frozenEntry.node) {
+        return { ok: false, stage: "revalidate", reason: "ID-less intervening assistant was replaced" };
+      }
+      if (stableTurnFingerprint(supplementalAssistantText(currentEntry.node)) !== frozenEntry.fingerprint) {
+        return { ok: false, stage: "revalidate", reason: "intervening assistant changed" };
+      }
+    }
+    const questionEntry = entries[expectedQuestionIndex] || null;
+    if (!questionEntry || questionEntry.role !== "user") {
+      return { ok: false, stage: "revalidate", reason: "selected question changed or provenance topology changed" };
+    }
+    const questionTurnId = String(proof.questionTurnId || "").trim();
+    if (questionTurnId) {
+      const questionIdMatches = supplementalConnectedStableIdMatches(entries, questionTurnId);
+      if (questionIdMatches.length !== 1 || questionIdMatches[0] !== questionEntry ||
+          questionEntry.turnId !== questionTurnId) {
+        return { ok: false, stage: "revalidate", reason: "selected question stable identity is missing or ambiguous" };
+      }
+    } else if (proof.questionNode.isConnected !== true || questionEntry.node !== proof.questionNode) {
+      return { ok: false, stage: "revalidate", reason: "ID-less selected question was replaced" };
+    }
+    if (stableTurnFingerprint(supplementalQuestionText(questionEntry.node)) !== proof.questionFingerprint) {
+      return { ok: false, stage: "revalidate", reason: "selected question changed or provenance topology changed" };
+    }
+    return { ok: true, assistantNode: assistantEntry.node, questionNode: questionEntry.node };
   }
 
   function hydrationTurnText(entry) {
@@ -6387,15 +6855,20 @@
     };
   }
 
+  function isControlDisabled(node) {
+    if (!node) return false;
+    return node.disabled === true ||
+      /^(?:true|disabled)$/i.test(String(node.getAttribute?.("aria-disabled") || "")) ||
+      /^(?:true|disabled)$/i.test(String(node.getAttribute?.("data-disabled") || ""));
+  }
+
   function isVisibleEnabledControl(node) {
     if (!node) return false;
     const tagName = String(node.tagName || "").toLowerCase();
     const role = String(node.getAttribute?.("role") || "").toLowerCase();
     if (tagName !== "button" && role !== "button") return false;
-    if (node.disabled === true || node.hidden === true) return false;
+    if (isControlDisabled(node) || node.hidden === true) return false;
     if (/^true$/i.test(String(node.getAttribute?.("aria-hidden") || ""))) return false;
-    if (/^(?:true|disabled)$/i.test(String(node.getAttribute?.("aria-disabled") || ""))) return false;
-    if (/^(?:true|disabled)$/i.test(String(node.getAttribute?.("data-disabled") || ""))) return false;
     return elementVisibilityDetails(node).visible;
   }
 
@@ -6404,10 +6877,8 @@
     const tagName = String(node.tagName || "").toLowerCase();
     const role = String(node.getAttribute?.("role") || "").toLowerCase();
     if (tagName !== "button" && role !== "button" && role !== "menuitem") return false;
-    if (node.disabled === true || node.hidden === true) return false;
+    if (isControlDisabled(node) || node.hidden === true) return false;
     if (/^true$/i.test(String(node.getAttribute?.("aria-hidden") || ""))) return false;
-    if (/^(?:true|disabled)$/i.test(String(node.getAttribute?.("aria-disabled") || ""))) return false;
-    if (/^(?:true|disabled)$/i.test(String(node.getAttribute?.("data-disabled") || ""))) return false;
     return elementVisibilityDetails(node).visible;
   }
 
@@ -6435,7 +6906,7 @@
       testId: String(node.getAttribute?.("data-testid") || "").slice(0, 120),
       dataState: String(node.getAttribute?.("data-state") || ""),
       ariaExpanded: String(node.getAttribute?.("aria-expanded") || ""),
-      disabled: node.disabled === true || /^(?:true|disabled)$/i.test(String(node.getAttribute?.("aria-disabled") || "")),
+      disabled: isControlDisabled(node),
       connected: node.isConnected !== false,
       visible: elementVisibilityDetails(node).visible,
       rect,
@@ -6572,6 +7043,53 @@
     };
   }
 
+  function isModalDisabledApprovedResponseShareControl(currentAssistantNode, approvedControl) {
+    const root = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode;
+    if (!root?.querySelectorAll || !approvedControl || approvedControl.isConnected === false) return false;
+    if (!isControlDisabled(approvedControl) || approvedControl.hidden === true) return false;
+    if (/^true$/i.test(String(approvedControl.getAttribute?.("aria-hidden") || ""))) return false;
+    if (!root.contains?.(approvedControl) || !isResponseActionToolbarControl(approvedControl, root)) return false;
+    if (!elementVisibilityDetails(approvedControl).visible) return false;
+
+    const tagName = String(approvedControl.tagName || "").toLowerCase();
+    const role = String(approvedControl.getAttribute?.("role") || "").toLowerCase();
+    if ((tagName !== "button" && role !== "button") || approvedControl.classList?.contains("gpt2obs-btn")) {
+      return false;
+    }
+    const marker = [
+      approvedControl.getAttribute?.("data-testid") || "",
+      approvedControl.getAttribute?.("aria-label") || "",
+      approvedControl.getAttribute?.("title") || "",
+      controlLabel(approvedControl)
+    ].map(value => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean).join(" ");
+    if (!/(?:\bshare\b|공유)/i.test(marker)) return false;
+
+    const disabledShareLikeControls = nodesIncludingRoot(root, "button, [role='button']")
+      .filter(node => node?.isConnected !== false && isControlDisabled(node) && node.hidden !== true)
+      .filter(node => !/^true$/i.test(String(node.getAttribute?.("aria-hidden") || "")))
+      .filter(node => !node.classList?.contains("gpt2obs-btn"))
+      .filter(node => root.contains?.(node) && isResponseActionToolbarControl(node, root))
+      .filter(node => elementVisibilityDetails(node).visible)
+      .filter(node => {
+        const candidateTag = String(node.tagName || "").toLowerCase();
+        const candidateRole = String(node.getAttribute?.("role") || "").toLowerCase();
+        if (candidateTag !== "button" && candidateRole !== "button") return false;
+        const candidateMarker = [
+          node.getAttribute?.("data-testid") || "",
+          node.getAttribute?.("aria-label") || "",
+          node.getAttribute?.("title") || "",
+          controlLabel(node)
+        ].map(value => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean).join(" ");
+        return /(?:\bshare\b|공유)/i.test(candidateMarker);
+      });
+    if (disabledShareLikeControls.length !== 1 || disabledShareLikeControls[0] !== approvedControl) {
+      return false;
+    }
+
+    const liveResolution = resolveResponseShareTrigger(currentAssistantNode);
+    return liveResolution.status === "missing" && liveResolution.candidateCount === 0;
+  }
+
   function resolveConversationShareTrigger(root = document) {
     const candidates = nodesIncludingRoot(root, "[data-testid='share-chat-button']")
       .filter(node => node?.isConnected !== false)
@@ -6655,6 +7173,270 @@
       control: null,
       reason: "response-specific share is missing and conversation share is unavailable"
     };
+  }
+
+  // The mature Share resolver and UI driver are provider-neutral already.
+  // Keep generic note sharing as aliases so selector, surface, and strict-URL
+  // behavior remain single-source with the specialized rich-app paths.
+  const resolveChatGptShareTriggerPlan = resolveVisualizeShareTriggerPlan;
+  const createOrReuseChatGptShareLink = createOrReuseVisualizeShareLink;
+
+  async function acquireSupplementalShareLink(options = {}) {
+    const currentAssistantNode = options.currentAssistantNode || null;
+    const proof = options.proof || null;
+    const runtimeGuard = options.runtimeGuard || null;
+    const root = options.root || document;
+    let liveAssistantNode = currentAssistantNode;
+    const resolveSharePlan = typeof options.resolveSharePlanFn === "function"
+      ? () => options.resolveSharePlanFn(liveAssistantNode, { root })
+      : options.sharePlan
+        ? () => options.sharePlan
+        : () => resolveChatGptShareTriggerPlan(liveAssistantNode, { root });
+    const nativePreflightFn = options.nativePreflightFn || pingNativeHelper;
+    const requestShareConsentFn = options.requestShareConsentFn || requestVisualizeShareConsent;
+    const requestClipboardReadPermissionFn = options.requestClipboardReadPermissionFn || requestClipboardReadPermission;
+    const createSupplementalShareLinkFn = options.createSupplementalShareLinkFn || createOrReuseChatGptShareLink;
+    let approvedPlan = null;
+    let consentBoundaryFailure = null;
+    let shareState = {
+      shareKind: "response",
+      shareSource: "",
+      shareCreatedThisAttempt: false,
+      shareUpdatedThisAttempt: false,
+      validatedShareUrl: "",
+      shareInteraction: "",
+      conversationShareActionOccurred: false
+    };
+    const updateShareState = result => {
+      if (!result) return shareState;
+      const source = String(result.shareSource || result.source || "").trim();
+      const validatedUrl = validateStrictChatGptShareUrl(result.validatedShareUrl || result.url || "");
+      shareState = {
+        shareKind: result.shareKind === "conversation" ? "conversation" : shareState.shareKind,
+        shareSource: source || shareState.shareSource,
+        shareCreatedThisAttempt: result.shareCreatedThisAttempt === true ||
+          (source === "created" && result.ok === true) ||
+          shareState.shareCreatedThisAttempt,
+        shareUpdatedThisAttempt: result.shareUpdatedThisAttempt === true || shareState.shareUpdatedThisAttempt,
+        validatedShareUrl: validatedUrl || shareState.validatedShareUrl,
+        shareInteraction: String(result.shareInteraction || shareState.shareInteraction || "").trim(),
+        conversationShareActionOccurred: result.conversationShareActionOccurred === true || shareState.conversationShareActionOccurred
+      };
+      return shareState;
+    };
+    const fail = (stage, reason, result = null) => {
+      updateShareState(result);
+      return {
+        ok: false,
+        stage: stage || result?.stage || "supplemental-share",
+        reason: reason || result?.reason || "supplemental Share failed",
+        shareState: { ...shareState }
+      };
+    };
+    const proofOptions = () => ({
+      ...(Array.isArray(options.nodes) ? { nodes: options.nodes } : {}),
+      ...(options.routeKey !== undefined ? { routeKey: options.routeKey } : {})
+    });
+    const revalidateProof = () => {
+      const status = revalidateSupplementalShareTargetProof(proof, proofOptions());
+      if (status?.ok) liveAssistantNode = status.assistantNode || liveAssistantNode;
+      return status;
+    };
+    const checkRuntimeAndProof = async phase => {
+      if (runtimeGuard?.check) {
+        const runtimeStatus = await checkRuntimeGuard(runtimeGuard, phase);
+        if (!runtimeStatus?.ok) {
+          return { ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" };
+        }
+      }
+      const proofStatus = revalidateProof();
+      if (!proofStatus?.ok) {
+        return { ok: false, stage: "preflight", reason: proofStatus?.reason || "supplemental Share target changed" };
+      }
+      return { ok: true };
+    };
+    const resolveCurrentPlan = () => {
+      let plan;
+      try {
+        plan = resolveSharePlan();
+      } catch (error) {
+        return { status: "unavailable", kind: "none", control: null, reason: error?.message || "Share capability resolution failed" };
+      }
+      return plan || { status: "unavailable", kind: "none", control: null, reason: "Share capability resolution failed" };
+    };
+    const revalidateApprovedPlan = reason => {
+      const currentPlan = resolveCurrentPlan();
+      if (currentPlan.status !== "found" || !currentPlan.control ||
+          currentPlan.kind !== approvedPlan?.kind || currentPlan.control !== approvedPlan?.control) {
+        return {
+          ok: false,
+          stage: "share-button",
+          reason: currentPlan.reason || reason || "approved Share scope or control changed"
+        };
+      }
+      return { ok: true, plan: currentPlan };
+    };
+
+    const initialBoundary = await checkRuntimeAndProof("supplemental-share-initial");
+    if (!initialBoundary.ok) return fail(initialBoundary.stage, initialBoundary.reason);
+    approvedPlan = resolveCurrentPlan();
+    if (approvedPlan.status !== "found" || !approvedPlan.control ||
+        (approvedPlan.kind !== "response" && approvedPlan.kind !== "conversation")) {
+      shareState.shareKind = approvedPlan.kind === "conversation" ? "conversation" : "response";
+      return fail("share-button", approvedPlan.reason || "no unambiguous Share trigger is available");
+    }
+    shareState.shareKind = approvedPlan.kind;
+    if (approvedPlan.kind === "conversation" && !String(proof?.targetTurnId || "").trim()) {
+      return fail("preflight", "conversation Share requires a stable selected assistant turn ID");
+    }
+
+    if (options.requiresNativeSave === true) {
+      let nativeStatus;
+      try {
+        nativeStatus = await nativePreflightFn("supplemental-share-preflight", { runtimeGuard });
+      } catch (error) {
+        nativeStatus = { ok: false, error: error?.message || String(error) };
+      }
+      if (!nativeStatus?.ok) {
+        return fail("native-preflight", nativeStatus?.error || "Native helper unavailable");
+      }
+      const postNativePreflightBoundary = await checkRuntimeAndProof("supplemental-share-after-native-preflight");
+      if (!postNativePreflightBoundary.ok) {
+        return fail(postNativePreflightBoundary.stage, postNativePreflightBoundary.reason);
+      }
+      const postNativePreflightPlan = revalidateApprovedPlan("approved Share scope or control changed during Native preflight");
+      if (!postNativePreflightPlan.ok) {
+        return fail(postNativePreflightPlan.stage, postNativePreflightPlan.reason);
+      }
+      approvedPlan = postNativePreflightPlan.plan;
+    }
+
+    const guardedPermissionRequest = () => {
+      const runtimeStatus = runtimeGuard?.checkSync
+        ? runtimeGuard.checkSync("supplemental-share-consent-permission")
+        : { ok: true };
+      if (!runtimeStatus?.ok) {
+        consentBoundaryFailure = {
+          stage: "runtime",
+          reason: runtimeStatus.error || "runtime unavailable"
+        };
+        return false;
+      }
+      const proofStatus = revalidateProof();
+      if (!proofStatus?.ok) {
+        consentBoundaryFailure = {
+          stage: "preflight",
+          reason: proofStatus?.reason || "supplemental Share target changed before clipboard permission"
+        };
+        return false;
+      }
+      const planStatus = revalidateApprovedPlan("approved Share scope or control changed before clipboard permission");
+      if (!planStatus.ok) {
+        consentBoundaryFailure = {
+          stage: planStatus.stage,
+          reason: planStatus.reason
+        };
+        return false;
+      }
+      approvedPlan = planStatus.plan;
+      return requestClipboardReadPermissionFn();
+    };
+
+    let consentResult;
+    try {
+      consentResult = await requestShareConsentFn({
+        requestPermission: guardedPermissionRequest,
+        consentMode: approvedPlan.kind === "conversation" ? "supplemental-conversation" : "supplemental"
+      });
+    } catch (error) {
+      return fail("share-confirm", error?.message || "supplemental Share consent UI failed");
+    }
+    if (consentBoundaryFailure) {
+      return fail(consentBoundaryFailure.stage, consentBoundaryFailure.reason);
+    }
+    if (consentResult?.approved !== true) {
+      return fail("share-confirm", "user cancelled supplemental Share consent");
+    }
+
+    const postConsentBoundary = await checkRuntimeAndProof("supplemental-share-after-consent");
+    if (!postConsentBoundary.ok) return fail(postConsentBoundary.stage, postConsentBoundary.reason);
+    const refreshedPlan = resolveCurrentPlan();
+    if (refreshedPlan.status !== "found" || !refreshedPlan.control) {
+      return fail("share-button", refreshedPlan.reason || "Share trigger disappeared after consent");
+    }
+    if (refreshedPlan.kind !== approvedPlan.kind || refreshedPlan.control !== approvedPlan.control) {
+      return fail("share-button", "approved Share scope or control changed after consent");
+    }
+    approvedPlan = refreshedPlan;
+    if (options.attemptContext && typeof options.attemptContext === "object") {
+      options.attemptContext.shareKind = approvedPlan.kind;
+      options.attemptContext.shareControl = approvedPlan.control;
+    }
+
+    const validateStrictContext = phase => {
+      const runtimeStatus = runtimeGuard?.checkSync
+        ? runtimeGuard.checkSync("supplemental-share-context")
+        : { ok: true };
+      if (!runtimeStatus?.ok) {
+        return { ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" };
+      }
+      const proofStatus = revalidateProof();
+      if (!proofStatus?.ok) {
+        return { ok: false, stage: "preflight", reason: proofStatus?.reason || "supplemental Share target changed" };
+      }
+      const currentPlan = resolveCurrentPlan();
+      if (currentPlan.status !== "found" || currentPlan.kind !== approvedPlan.kind || currentPlan.control !== approvedPlan.control) {
+        const postClickPhase = !!String(phase || "").trim() && phase !== "share-button";
+        if (postClickPhase && approvedPlan.kind === "response" &&
+            isModalDisabledApprovedResponseShareControl(liveAssistantNode, approvedPlan.control)) {
+          return { ok: true };
+        }
+        return { ok: false, stage: "share-button", reason: "approved Share scope or control changed" };
+      }
+      return { ok: true };
+    };
+    const preCreateBoundary = validateStrictContext();
+    if (!preCreateBoundary.ok) return fail(preCreateBoundary.stage, preCreateBoundary.reason);
+
+    let shareResult;
+    try {
+      shareResult = await createSupplementalShareLinkFn(liveAssistantNode, {
+        ...(options.shareOptions || {}),
+        runtimeGuard,
+        root,
+        shareKind: approvedPlan.kind,
+        shareTrigger: approvedPlan.control,
+        shareRoot: options.shareRoot || (approvedPlan.kind === "conversation" ? root : liveAssistantNode),
+        validateShareContext: validateStrictContext,
+        clipboardPermissionGranted: consentResult.permissionGranted === true
+      });
+    } catch (error) {
+      return fail("share-button", error?.message || String(error));
+    }
+    updateShareState(shareResult);
+    if (!shareResult?.ok) {
+      return fail(shareResult?.stage || "share-url", shareResult?.reason || "supplemental Share link acquisition failed", shareResult);
+    }
+    const validatedShareUrl = validateStrictChatGptShareUrl(shareResult.validatedShareUrl || shareResult.url || "");
+    if (!validatedShareUrl) {
+      return fail("share-url", "share flow returned an invalid ChatGPT share URL", shareResult);
+    }
+    shareState.validatedShareUrl = validatedShareUrl;
+    const supplementalShare = supplementalShareMetadata({
+      shareUrl: validatedShareUrl,
+      shareScope: approvedPlan.kind,
+      targetTurnId: proof.targetTurnId,
+      shareInteraction: shareState.shareInteraction,
+      conversationShareFreshness: approvedPlan.kind === "conversation"
+        ? (shareResult.conversationShareFreshness === "verified" || shareResult.conversationShareFreshness === "unverified"
+          ? shareResult.conversationShareFreshness
+          : shareState.shareInteraction === "instant-copy" ? "unverified" : "")
+        : ""
+    });
+    if (!supplementalShare) {
+      return fail("share-url", "validated Share metadata could not be assembled", shareResult);
+    }
+    return { ok: true, supplementalShare, shareState: { ...shareState } };
   }
 
   function findResponseShareButton(currentAssistantNode) {
@@ -9168,6 +9950,8 @@
   function requestVisualizeShareConsent({ requestPermission = requestClipboardReadPermission, consentMode = "visualize" } = {}) {
     const isProviderNeutralRichApp = consentMode === "rich-app-continuation" || consentMode === "previous-qa-rich-app";
     const isConversationShare = consentMode === "conversation";
+    const isSupplementalShare = consentMode === "supplemental";
+    const isSupplementalConversationShare = consentMode === "supplemental-conversation";
     return new Promise(resolve => {
       let host = null;
       let continueButton = null;
@@ -9240,14 +10024,22 @@
             </section>
           </div>`;
         shadow.querySelector("#gpt2obs-consent-title").textContent = t(
-          isConversationShare
+          isSupplementalConversationShare
+            ? "conversationShareConsentTitle"
+            : isSupplementalShare
+              ? "chatGptShareConsentTitle"
+              : isConversationShare
             ? "conversationShareConsentTitle"
             : isProviderNeutralRichApp
               ? "richAppConsentTitle"
               : "visualizeConsentTitle"
         );
         shadow.querySelector("[data-gpt2obs-consent-body]").textContent = t(
-          isConversationShare
+          isSupplementalConversationShare
+            ? "chatGptConversationShareConsent"
+            : isSupplementalShare
+              ? "chatGptShareConsent"
+              : isConversationShare
             ? "conversationShareConfirm"
             : isProviderNeutralRichApp
               ? "richAppShareConfirm"
@@ -10201,6 +10993,23 @@
       const questionText = findPrevUserMessageText(btn);
       answerText = cleanAnswerText(answerText);
       answerText = stripChatGptFooterLines(answerText);
+      const supplementalOptions = options.supplementalShareOptions || {};
+      const supplementalProofResult = captureSupplementalShareTargetProof(currentAssistantNode, {
+        ...(Array.isArray(supplementalOptions.nodes) ? { nodes: supplementalOptions.nodes } : {}),
+        ...(supplementalOptions.routeKey !== undefined ? { routeKey: supplementalOptions.routeKey } : {})
+      });
+      if (!supplementalProofResult?.ok) {
+        const failure = {
+          ok: false,
+          stage: "preflight",
+          reason: supplementalProofResult?.reason || "ordinary Share target could not be frozen"
+        };
+        try {
+          alertFn(formatI18nTemplate(t("chatGptShareFailedPrefix"), failure));
+        } catch {}
+        return failure;
+      }
+      const supplementalProof = supplementalProofResult.proof;
       const preSaveKey = `${location.href}::${answerText.length}::rich-${richExpected.length}::${questionText.slice(0, 120)}`;
       if (state.activeSaves.has(preSaveKey)) return;
       if (isDuplicateContentSave(preSaveKey)) return;
@@ -10215,11 +11024,27 @@
         return;
       }
       const hintedAttachmentNames = filenamesFromText(answerText);
-      const extraction = await extractDownloadFiles(btn, hintedAttachmentNames, answerText, { runtimeGuard });
+      const extractDownloadFilesFn = options.extractDownloadFilesFn || extractDownloadFiles;
+      const extraction = await extractDownloadFilesFn(btn, hintedAttachmentNames, answerText, { runtimeGuard });
       if (extraction.runtimeUnavailable || runtimeGuard.isAborted()) {
         runtimeGuard.fail(extraction.runtimeFailure || runtimeGuard.getFailure(), "html-artifact");
         runtimeGuard.notify();
         return;
+      }
+      const postArtifactProofStatus = revalidateSupplementalShareTargetProof(supplementalProof, {
+        ...(Array.isArray(supplementalOptions.nodes) ? { nodes: supplementalOptions.nodes } : {}),
+        ...(supplementalOptions.routeKey !== undefined ? { routeKey: supplementalOptions.routeKey } : {})
+      });
+      if (!postArtifactProofStatus?.ok) {
+        const failure = {
+          ok: false,
+          stage: "preflight",
+          reason: postArtifactProofStatus?.reason || "ordinary Share target changed during artifact extraction"
+        };
+        try {
+          alertFn(formatI18nTemplate(t("chatGptShareFailedPrefix"), failure));
+        } catch {}
+        return failure;
       }
       const attachments = extraction.files;
       const downloadedAttachments = extraction.downloadedFiles;
@@ -10288,38 +11113,111 @@
       const title = makeTitle(noteQuestionText || noteAnswerText);
       const filePath = buildFilePath(title);
       const attachmentMarker = hasRealHtmlAttachment ? "%%GPT_OBSIDIAN_ATTACHMENTS%%" : "";
-      const baseMd = hasRealHtmlAttachment
+      const requiresNativeSave = hasRealHtmlAttachment || hasDetailedMarkdown;
+      const buildOrdinaryBaseMarkdown = (marker, supplementalShare = null) => hasRealHtmlAttachment
         ? buildHtmlLearningMarkdown({
           title,
           questionText: noteQuestionText,
           answerText: noteAnswerText,
           url: location.href,
-          attachmentMarker,
+          attachmentMarker: marker,
           useOriginalHeadings: useOriginalQaHeadings,
-          captureMetadata
+          captureMetadata,
+          supplementalShare
         })
-        : buildMarkdown({title, questionText: noteQuestionText, answerText: noteAnswerText, url: location.href, attachmentMarker: "", captureMetadata});
-      const md = removeEmptyMarkdownLinkTargets(generatedMarkdown.markdown
-        ? mergeDetailedMarkdownSection(baseMd, generatedMarkdown.markdown)
-        : downloadedMarkdown
-          ? mergeDownloadedDetailedMarkdownMarker(baseMd)
-          : baseMd);
-      const fallbackBaseMd = hasRealHtmlAttachment
-        ? buildHtmlLearningMarkdown({
+        : buildMarkdown({
           title,
           questionText: noteQuestionText,
           answerText: noteAnswerText,
           url: location.href,
           attachmentMarker: "",
-          useOriginalHeadings: useOriginalQaHeadings,
-          captureMetadata
-        })
+          captureMetadata,
+          supplementalShare
+        });
+      const applyDetailedMarkdown = base => removeEmptyMarkdownLinkTargets(generatedMarkdown.markdown
+        ? mergeDetailedMarkdownSection(base, generatedMarkdown.markdown)
+        : downloadedMarkdown
+          ? mergeDownloadedDetailedMarkdownMarker(base)
+          : base);
+      const applyFallbackDetailedMarkdown = base => removeEmptyMarkdownLinkTargets(generatedMarkdown.markdown
+        ? mergeDetailedMarkdownSection(base, generatedMarkdown.markdown)
+        : base);
+
+      // Validate a complete link-less draft and transport before asking the
+      // user to create any remote Share side effect.
+      const linklessBaseMd = buildOrdinaryBaseMarkdown(attachmentMarker, null);
+      const linklessMd = applyDetailedMarkdown(linklessBaseMd);
+      const linklessFallbackMd = hasRealHtmlAttachment
+        ? applyFallbackDetailedMarkdown(buildOrdinaryBaseMarkdown("", null))
+        : linklessMd;
+      const linklessUri = buildObsidianURI({ vault: settings.vaultName, file: filePath, content: linklessFallbackMd });
+      if (!linklessMd || !linklessFallbackMd || !/^obsidian:\/\//i.test(linklessUri)) {
+        const failure = { ok: false, stage: "preflight", reason: "ordinary Markdown or URI draft could not be assembled" };
+        try { alertFn(formatI18nTemplate(t("chatGptShareFailedPrefix"), failure)); } catch {}
+        return failure;
+      }
+
+      const reportSupplementalFailure = (failureInput, fallbackShareState = null) => {
+        const shareState = failureInput?.shareState || fallbackShareState || {};
+        const failure = {
+          ...(failureInput || {}),
+          ok: false,
+          stage: failureInput?.stage || "native-save",
+          reason: failureInput?.reason || failureInput?.error || "Obsidian note save failed",
+          shareState
+        };
+        const cancelled = failure.stage === "share-confirm" && /cancelled/i.test(String(failure.reason || ""));
+        if (!cancelled && failure.failureAlertShown !== true) {
+          try { alertFn(formatI18nTemplate(t("chatGptShareFailedPrefix"), failure)); } catch {}
+        }
+        if (shareState.shareKind === "conversation" && shareState.conversationShareActionOccurred) {
+          const warningKey = shareState.validatedShareUrl
+            ? (shareState.shareInteraction === "instant-copy"
+              ? "conversationShareCopiedButSaveFailed"
+              : "conversationShareChangedButSaveFailed")
+            : "conversationShareChangeAttemptUnverified";
+          try { alertFn(t(warningKey)); } catch {}
+        } else if (shareState.shareCreatedThisAttempt || shareState.shareUpdatedThisAttempt) {
+          const warningKey = shareState.validatedShareUrl
+            ? "chatGptShareCreatedButSaveFailed"
+            : "visualizeShareCreateAttemptUnverified";
+          try { alertFn(t(warningKey)); } catch {}
+        }
+        return failure;
+      };
+
+      const supplementalAttemptContext = {};
+      const supplementalAcquisition = await acquireSupplementalShareLink({
+        ...supplementalOptions,
+        currentAssistantNode,
+        proof: supplementalProof,
+        runtimeGuard,
+        root: supplementalOptions.root || document,
+        routeKey: supplementalOptions.routeKey,
+        requiresNativeSave,
+        nativePreflightFn: options.nativePreflightFn || supplementalOptions.nativePreflightFn || pingNativeHelper,
+        requestShareConsentFn: options.requestShareConsentFn || supplementalOptions.requestShareConsentFn || requestVisualizeShareConsent,
+        requestClipboardReadPermissionFn: options.requestClipboardReadPermissionFn || supplementalOptions.requestClipboardReadPermissionFn || requestClipboardReadPermission,
+        createSupplementalShareLinkFn: options.createSupplementalShareLinkFn || supplementalOptions.createSupplementalShareLinkFn || createOrReuseChatGptShareLink,
+        sharePlan: options.supplementalSharePlan || supplementalOptions.sharePlan || null,
+        shareOptions: supplementalOptions.shareOptions || supplementalOptions,
+        attemptContext: supplementalAttemptContext
+      });
+      if (!supplementalAcquisition?.ok) {
+        const failure = supplementalAcquisition || { ok: false, stage: "share-url", reason: "supplemental Share link acquisition failed" };
+        return reportSupplementalFailure(failure);
+      }
+
+      const failAfterSupplementalShare = failureInput => {
+        return reportSupplementalFailure(failureInput, supplementalAcquisition.shareState);
+      };
+
+      const baseMd = buildOrdinaryBaseMarkdown(attachmentMarker, supplementalAcquisition.supplementalShare);
+      const md = applyDetailedMarkdown(baseMd);
+      const fallbackMd = hasRealHtmlAttachment
+        ? applyFallbackDetailedMarkdown(buildOrdinaryBaseMarkdown("", supplementalAcquisition.supplementalShare))
         : md;
-      const fallbackMd = removeEmptyMarkdownLinkTargets(generatedMarkdown.markdown
-        ? mergeDetailedMarkdownSection(fallbackBaseMd, generatedMarkdown.markdown)
-        : fallbackBaseMd);
       const uri = buildObsidianURI({vault: settings.vaultName, file: filePath, content: fallbackMd});
-      const requiresNativeSave = hasRealHtmlAttachment || hasDetailedMarkdown;
       debugLog("save mode", {
         mode: requiresNativeSave ? "native" : "uri",
         attachmentsLength: attachments.length,
@@ -10337,23 +11235,117 @@
         richArtifactsComplete: richIntegrity.completeCount,
         allowPartialRich
       });
-      saveAttempted = true;
+
+      const validateSupplementalFinalBoundary = () => {
+        const runtimeStatus = runtimeGuard?.checkSync
+          ? runtimeGuard.checkSync("supplemental-share-before-save")
+          : { ok: true };
+        if (!runtimeStatus?.ok) {
+          return { ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" };
+        }
+        const proofStatus = revalidateSupplementalShareTargetProof(supplementalProof, {
+          ...(Array.isArray(supplementalOptions.nodes) ? { nodes: supplementalOptions.nodes } : {}),
+          ...(supplementalOptions.routeKey !== undefined ? { routeKey: supplementalOptions.routeKey } : {})
+        });
+        if (!proofStatus?.ok) {
+          return { ok: false, stage: "preflight", reason: proofStatus?.reason || "ordinary Share target changed before save" };
+        }
+        let finalPlan;
+        try {
+          finalPlan = typeof supplementalOptions.resolveSharePlanFn === "function"
+            ? supplementalOptions.resolveSharePlanFn(proofStatus.assistantNode, { root: supplementalOptions.root || document })
+            : options.supplementalSharePlan || supplementalOptions.sharePlan || resolveChatGptShareTriggerPlan(
+              proofStatus.assistantNode,
+              { root: supplementalOptions.root || document }
+            );
+        } catch (error) {
+          return { ok: false, stage: "share-button", reason: error?.message || "Share capability revalidation failed" };
+        }
+        if (finalPlan?.status !== "found" ||
+            finalPlan.kind !== supplementalAttemptContext.shareKind ||
+            finalPlan.control !== supplementalAttemptContext.shareControl) {
+          return { ok: false, stage: "share-button", reason: "approved Share scope or control changed before save" };
+        }
+        return { ok: true };
+      };
+      const finalRuntime = await checkRuntimeGuard(runtimeGuard, "supplemental-share-before-save");
+      if (!finalRuntime?.ok) {
+        return failAfterSupplementalShare({
+          ok: false,
+          stage: "runtime",
+          reason: finalRuntime?.error || finalRuntime?.reason || "runtime unavailable"
+        });
+      }
+      const finalBoundary = validateSupplementalFinalBoundary();
+      if (!finalBoundary.ok) {
+        return failAfterSupplementalShare(finalBoundary);
+      }
       if (requiresNativeSave) {
-        await saveObsidianNote({
-          vaultName: settings.vaultName,
-          vaultPath: settings.vaultPath,
-          filePath,
-          content: md,
-          attachments,
-          downloadedAttachments,
-          downloadedMarkdown,
-          attachmentNames,
-          allowPartialAttachments,
-          htmlSaveDir: settings.htmlSaveDir,
-          fallbackUri: hasDetailedMarkdown ? "" : uri
-        }, { runtimeGuard, showAlert: alertFn });
+        const saveObsidianNoteFn = options.saveObsidianNoteFn || saveObsidianNote;
+        let saveResponse;
+        try {
+          saveResponse = await saveObsidianNoteFn({
+            vaultName: settings.vaultName,
+            vaultPath: settings.vaultPath,
+            filePath,
+            content: md,
+            attachments,
+            downloadedAttachments,
+            downloadedMarkdown,
+            attachmentNames,
+            allowPartialAttachments,
+            htmlSaveDir: settings.htmlSaveDir,
+            fallbackUri: hasDetailedMarkdown ? "" : uri
+          }, { runtimeGuard, showAlert: alertFn, validateContext: validateSupplementalFinalBoundary });
+        } catch (error) {
+          // A throwing injected/Native boundary cannot prove that no transport
+          // was dispatched, so retain the duplicate reservation conservatively.
+          saveAttempted = true;
+          const failure = {
+            ok: false,
+            stage: "native-save",
+            reason: error?.message || String(error),
+            shareState: supplementalAcquisition.shareState
+          };
+          return failAfterSupplementalShare(failure);
+        }
+        // The real Native helper reports whether its Native/URI boundary was
+        // crossed. Unknown legacy test seams remain conservative.
+        saveAttempted = saveResponse?.nativeAttempted !== false || saveResponse?.fallbackAttempted === true;
+        if (!saveResponse?.ok) {
+          const failure = {
+            ...saveResponse,
+            ok: false,
+            stage: saveResponse?.stage || "native-save",
+            reason: saveResponse?.reason || saveResponse?.error || "Native helper save failed",
+            failureAlertShown: saveResponse?.failureAlertShown === true,
+            shareState: supplementalAcquisition.shareState
+          };
+          return failAfterSupplementalShare(failure);
+        }
+        return {
+          ok: true,
+          mode: "ordinary-native",
+          supplementalShare: supplementalAcquisition.supplementalShare,
+          shareState: supplementalAcquisition.shareState,
+          saveResponse
+        };
       } else {
-        openObsidianURI(uri);
+        const openObsidianURIFn = options.openObsidianURIFn || openObsidianURI;
+        saveAttempted = true;
+        openObsidianURIFn(uri, {
+          runtimeGuard,
+          validateContext: validateSupplementalFinalBoundary,
+          // The callback may arrive after this dispatch acknowledgement.
+          // Keep the attempt's Share state available for a later failure.
+          onFailure: failAfterSupplementalShare
+        });
+        return {
+          ok: true,
+          mode: "ordinary-uri",
+          supplementalShare: supplementalAcquisition.supplementalShare,
+          shareState: supplementalAcquisition.shareState
+        };
       }
       } finally {
         state.activeSaves.delete(preSaveKey);
@@ -10432,6 +11424,9 @@
       findPreviousMessageByRole,
       findPreviousQaPair,
       questionNodeToPlainText,
+      supplementalStableTurnId,
+      captureSupplementalShareTargetProof,
+      revalidateSupplementalShareTargetProof,
       isPreviousAnswerVisualizationRequestText,
       resolveVisualizeSaveContext,
       resolveVisualizeSaveContextWithHydration,
@@ -10460,6 +11455,9 @@
       buildDirectVisualizeShareMarkdownDraft,
       prepareVisualizeSharePreflight,
       captureMetadataFrontmatterLines,
+      supplementalShareMetadata,
+      supplementalShareFrontmatterLines,
+      supplementalShareBodyLines,
       buildFilePath,
       makeTitle,
       cleanQuestionText,
@@ -10493,6 +11491,8 @@
       waitForValidatedShareUrl,
       waitForUpdatedConversationShareUrl,
       createOrReuseVisualizeShareLink,
+      createOrReuseChatGptShareLink,
+      acquireSupplementalShareLink,
       filenameFromArtifactText,
       filenamesFromArtifactText,
       filenameFromText,
@@ -10518,6 +11518,7 @@
       resolveResponseShareTrigger,
       resolveConversationShareTrigger,
       resolveVisualizeShareTriggerPlan,
+      resolveChatGptShareTriggerPlan,
       findResponseShareButton,
       choosePreferredArtifactRow,
       resolveArtifactFileRow,

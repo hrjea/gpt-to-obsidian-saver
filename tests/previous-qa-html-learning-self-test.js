@@ -179,7 +179,73 @@ function buildScenarioNote(hooks, nodes, currentNode, hasRealHtmlAttachment, use
 
 const hooks = loadContentHooks();
 const backgroundHooks = loadBackgroundHooks();
-assert.strictEqual(hooks.VERSION, "1.5.50");
+assert.strictEqual(hooks.VERSION, "1.5.52");
+
+const responseShareUrl = ["https://chatgpt.com", "s", "synthetic-response-note"].join("/");
+const responseSupplement = hooks.supplementalShareMetadata({ shareUrl: responseShareUrl, shareScope: "response" });
+assert.deepStrictEqual(JSON.parse(JSON.stringify(responseSupplement)), { shareScope: "response", chatGptShareUrl: responseShareUrl });
+
+const conversationShareUrl = ["https://chatgpt.com", "s", "synthetic-conversation-note"].join("/");
+const conversationSupplement = hooks.supplementalShareMetadata({
+  shareUrl: conversationShareUrl, shareScope: "conversation", targetTurnId: "turn-a2",
+  shareInteraction: "dialog", conversationShareFreshness: "verified"
+});
+assert.deepStrictEqual(JSON.parse(JSON.stringify(conversationSupplement)), {
+  shareScope: "conversation", conversationShareUrl, targetTurnId: "turn-a2",
+  shareInteraction: "dialog", conversationShareFreshness: "verified"
+});
+assert.strictEqual(hooks.supplementalShareMetadata({ shareUrl: "javascript:alert(1)", shareScope: "response" }), null);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(hooks.supplementalShareFrontmatterLines({
+  shareScope: "unknown", chatGptShareUrl: responseShareUrl
+}))), []);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(hooks.supplementalShareBodyLines({
+  shareScope: "unknown", chatGptShareUrl: responseShareUrl
+}))), []);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(hooks.supplementalShareFrontmatterLines({
+  shareScope: "response", chatGptShareUrl: "javascript:alert(1)", shareInteraction: "dialog"
+}))), []);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(hooks.supplementalShareBodyLines({
+  shareScope: "response", chatGptShareUrl: "javascript:alert(1)", shareInteraction: "dialog"
+}))), []);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(hooks.supplementalShareMetadata({
+  shareUrl: responseShareUrl, shareScope: "response", shareInteraction: "dialog", conversationShareFreshness: "verified"
+}))), { shareScope: "response", chatGptShareUrl: responseShareUrl });
+for (const render of [hooks.supplementalShareFrontmatterLines, hooks.supplementalShareBodyLines]) {
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(render({ chatGptShareUrl: responseShareUrl }))), []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(render({ shareScope: "response", conversationShareUrl: conversationShareUrl }))), []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(render({ shareScope: "conversation", chatGptShareUrl: responseShareUrl, targetTurnId: "turn-a2" }))), []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(render({ shareScope: "response", chatGptShareUrl: responseShareUrl, conversationShareUrl: conversationShareUrl }))), []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(render({ shareScope: "conversation", conversationShareUrl: conversationShareUrl, targetTurnId: "turn-a2", chatGptShareUrl: responseShareUrl }))), []);
+}
+
+const markdown = hooks.buildMarkdown({ title: "Synthetic note", questionText: "What is this?", answerText: "A test answer.", url: "https://chatgpt.example/conversation", supplementalShare: responseSupplement });
+assert.strictEqual(markdown.split(responseShareUrl).length - 1, 2);
+assert.strictEqual((markdown.match(/# ChatGPT Share/g) || []).length, 1);
+assert(markdown.includes("chatgpt_share_url:"));
+assert(markdown.includes("share_scope: response"));
+assert(!markdown.includes("capture_status: remote-reference"));
+assert(!markdown.includes("app_provider:"));
+const shareIndex = markdown.indexOf("# ChatGPT Share");
+assert(markdown.indexOf("# Question") > shareIndex);
+assert(markdown.indexOf("# Answer") > markdown.indexOf("# Question"));
+
+const htmlMarkdown = hooks.buildHtmlLearningMarkdown({ title: "Synthetic HTML note", questionText: "What is this?", answerText: "A test answer.", url: "https://chatgpt.example/conversation", supplementalShare: responseSupplement, useOriginalHeadings: true });
+assert.strictEqual(htmlMarkdown.split(responseShareUrl).length - 1, 2);
+assert.strictEqual((htmlMarkdown.match(/# ChatGPT Share/g) || []).length, 1);
+assert(htmlMarkdown.includes("chatgpt_share_url:"));
+assert(htmlMarkdown.includes("share_scope: response"));
+assert(!htmlMarkdown.includes("capture_status: remote-reference"));
+const htmlShareIndex = htmlMarkdown.indexOf("# ChatGPT Share");
+assert(htmlMarkdown.indexOf("# HTML Learning Material") > htmlShareIndex);
+assert(htmlMarkdown.indexOf("# Original Question") > htmlMarkdown.indexOf("# HTML Learning Material"));
+assert(htmlMarkdown.indexOf("# Original Answer") > htmlMarkdown.indexOf("# Original Question"));
+
+const conversationMarkdown = hooks.buildMarkdown({ title: "Conversation note", questionText: "Question", answerText: "Answer", url: "https://chatgpt.example/conversation", supplementalShare: conversationSupplement });
+assert(conversationMarkdown.includes(`conversation_share_url: ${JSON.stringify(conversationShareUrl)}`));
+assert(conversationMarkdown.includes('target_turn_id: "turn-a2"'));
+assert(conversationMarkdown.includes("share_interaction: dialog"));
+assert(conversationMarkdown.includes("conversation_share_freshness: verified"));
+assert(!conversationMarkdown.includes("chatgpt_share_url:"));
 assert.strictEqual(
   backgroundHooks.DOWNLOAD_WATCH_TIMEOUT_MS,
   90000,
