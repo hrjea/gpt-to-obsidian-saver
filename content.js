@@ -1,7 +1,7 @@
 
-// content.js (1.5.52) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.53) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.52";
+  const VERSION = "1.5.53";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
@@ -58,6 +58,7 @@
       chatGptConversationShareConsent: "The answer will still be saved as a local Markdown or HTML note. Because the current response has no individual Share action, a validated whole-conversation ChatGPT link will be added as a supplemental remote link.\n\nThe extension will request optional clipboard-read permission. After this attempt's Copy link action shows a fresh Copied confirmation, it may read the clipboard once only to validate one ChatGPT share URL. The raw clipboard value is not logged or stored separately.\n\nAnyone with the link may be able to view conversation content up to the share point, not only the current response.\n\nCancel: do not request permission, click Share, or create any Obsidian note\nContinue: share the conversation, then save the local note with that link",
       chatGptShareConsentTitle: "Save a ChatGPT share link",
       chatGptShareFailedPrefix: "ChatGPT share save stopped at {stage}: {reason}",
+      localSaveFailedPrefix: "Obsidian save stopped at {stage}: {reason}",
       chatGptShareCreatedButSaveFailed: "A ChatGPT response share link was created, but the Obsidian note was not saved. The link may remain active. If needed, manage or disable it manually from ChatGPT; the extension will not roll it back automatically.",
       nativeSaveFailedPrefix: "Native helper save failed: ",
       nativeSaveFailedSuffix: "\nThe extension attempted to open the Markdown note through URI mode, but could not verify that Obsidian created it. HTML attachments may not have been saved.",
@@ -139,6 +140,7 @@
       chatGptConversationShareConsent: "답변은 계속 로컬 Markdown 또는 HTML 노트로 저장하고, 현재 응답에 개별 공유 동작이 없으므로 검증된 ChatGPT 전체 대화 공유링크를 추가 원격 링크로 함께 넣습니다.\n\n선택 권한인 클립보드 읽기 권한을 요청합니다. 이번 시도의 '링크 복사' 동작 뒤 새 '복사됨' 표시가 확인된 경우에만 클립보드를 한 번 읽어 ChatGPT 공유 URL 하나인지 검증합니다. 원본 클립보드 값은 로그나 별도 저장소에 기록하지 않습니다.\n\n링크를 아는 사람은 현재 응답만이 아니라 공유 시점까지의 대화 내용을 볼 수 있습니다.\n\n취소: 권한을 요청하거나 공유 버튼을 누르지 않고 Obsidian 노트를 만들지 않음\n계속: 전체 대화를 공유한 뒤 로컬 노트에 링크를 함께 저장",
       chatGptShareConsentTitle: "ChatGPT 공유링크 저장",
       chatGptShareFailedPrefix: "ChatGPT 공유 저장이 {stage} 단계에서 중단되었습니다: {reason}",
+      localSaveFailedPrefix: "Obsidian 저장이 {stage} 단계에서 중단되었습니다: {reason}",
       chatGptShareCreatedButSaveFailed: "ChatGPT 응답 공유링크는 생성됐지만 Obsidian 노트는 저장되지 않았습니다. 링크는 계속 활성 상태일 수 있습니다. 필요하면 ChatGPT에서 직접 공유를 관리하거나 해제하세요. 확장 프로그램은 자동으로 되돌리지 않습니다.",
       nativeSaveFailedPrefix: "Native helper 저장 실패: ",
       nativeSaveFailedSuffix: "\nMarkdown 노트를 URI mode로 열도록 시도했지만 Obsidian이 실제 파일을 생성했는지는 확인할 수 없습니다. HTML 첨부파일은 저장되지 않았을 수 있습니다.",
@@ -2445,6 +2447,19 @@
       return url.href;
     } catch {
       return href.split("#", 1)[0];
+    }
+  }
+
+  function isProjectConversationUrl(value) {
+    const href = String(value || "");
+    // Only the actual Project conversation route opts out of Share. A custom
+    // GPT, a project home, or project-looking text in a query is not enough.
+    if (!/^https:\/\/(?:chatgpt\.com|chat\.openai\.com)\//i.test(href)) return false;
+    try {
+      const url = new URL(href);
+      return /^\/g\/g-p-[a-f0-9]{32}(?:-[^/]+)?\/c\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/?$/i.test(url.pathname);
+    } catch {
+      return false;
     }
   }
 
@@ -10810,6 +10825,32 @@
       // download/native boundary below awaits this same in-flight preflight.
       void runtimeGuard.check("save-start");
       let currentAssistantNode = closestMessageContainer(btn);
+      const sourceUrl = String(location.href || "");
+      const projectConversation = isProjectConversationUrl(sourceUrl);
+      const projectRouteKey = projectConversation ? conversationRouteKey() : "";
+      const projectAssistantNode = projectConversation ? currentAssistantNode : null;
+      const projectAssistantId = projectAssistantNode?.getAttribute?.("data-message-id") || "";
+      const saveFailureMessage = failure => formatI18nTemplate(
+        t(projectConversation ? "localSaveFailedPrefix" : "chatGptShareFailedPrefix"), failure
+      );
+      const validateProjectSaveContext = () => {
+        if (conversationRouteKey() !== projectRouteKey || !isProjectConversationUrl(location.href)) {
+          return { ok: false, stage: "preflight", reason: "project conversation route changed" };
+        }
+        if (!projectAssistantNode || projectAssistantNode.isConnected !== true ||
+            roleAttrForNode(projectAssistantNode) !== "assistant" ||
+            (projectAssistantNode.getAttribute?.("data-message-id") || "") !== projectAssistantId) {
+          return { ok: false, stage: "preflight", reason: "project selected assistant changed" };
+        }
+        return { ok: true };
+      };
+      if (projectConversation) {
+        const initialProjectContext = validateProjectSaveContext();
+        if (!initialProjectContext.ok) {
+          try { alertFn(saveFailureMessage(initialProjectContext)); } catch {}
+          return initialProjectContext;
+        }
+      }
       let actionButton = btn;
       const pendingVisualizeAttemptKey = visualizeAttemptKeyForNode(currentAssistantNode);
       if (pendingVisualizeAttemptKey && state.activeVisualizeAttempts.has(pendingVisualizeAttemptKey)) {
@@ -10825,7 +10866,7 @@
       const currentIndex = findMessageNodeIndex(messageNodes, currentAssistantNode);
       const previousRequest = findPreviousMessageByRole(messageNodes, currentIndex, "user")?.node || previousQaCandidate?.requestNode || null;
       const structuredVisualizeCandidate = isVisualizeShareCandidate(currentAssistantNode, { requestNode: previousRequest });
-      if (structuredVisualizeCandidate) {
+      if (!projectConversation && structuredVisualizeCandidate) {
         const attemptKey = pendingVisualizeAttemptKey;
         if (attemptKey && state.activeVisualizeAttempts.has(attemptKey)) {
           return { ok: false, stage: "duplicate", reason: "Visualize save attempt already in progress" };
@@ -10918,7 +10959,7 @@
       } catch (error) {
         previousQaRichAppContext = { mode: "unresolved", reason: error?.message || "provider-neutral previous-Q&A rich app resolution failed" };
       }
-      if (previousQaRichAppContext?.mode === "previous-qa-rich-app") {
+      if (!projectConversation && previousQaRichAppContext?.mode === "previous-qa-rich-app") {
         const resolvedPreviousQa = {
           questionNode: previousQaRichAppContext.questionNode,
           answerNode: previousQaRichAppContext.answerNode,
@@ -10951,7 +10992,7 @@
       try { continuationContext = resolveRichAppContinuationContext(currentAssistantNode); } catch (error) {
         continuationContext = { mode: "unresolved", reason: error?.message || "rich app continuation resolution failed" };
       }
-      if (continuationContext?.mode === "rich-app-continuation") {
+      if (!projectConversation && continuationContext?.mode === "rich-app-continuation") {
         return handleVisualizeShareSave({
           btn,
           currentAssistantNode,
@@ -10973,13 +11014,14 @@
           saveObsidianNoteFn: options.saveObsidianNoteFn || saveObsidianNote
         });
       }
-      let answerText = preferClipboard ? await readClipboardSafe() : "";
+      const useClipboard = !projectConversation && preferClipboard;
+      let answerText = useClipboard ? await readClipboardSafe() : "";
       // If clipboard is just an Obsidian test URI, prefer DOM extraction.
       if (answerText && /^obsidian:\/\/\S+/i.test(answerText.trim())) {
         answerText = "";
       }
       // Prefer HTML→Markdown conversion to preserve structure
-      answerText = htmlOrClipboardToMarkdown(btn, answerText, preferClipboard);
+      answerText = htmlOrClipboardToMarkdown(btn, answerText, useClipboard);
       if (!answerText || answerText.length < 3) {
         // final fallback: plain text from DOM
         const clone = currentAssistantNode?.cloneNode(true);
@@ -10994,7 +11036,7 @@
       answerText = cleanAnswerText(answerText);
       answerText = stripChatGptFooterLines(answerText);
       const supplementalOptions = options.supplementalShareOptions || {};
-      const supplementalProofResult = captureSupplementalShareTargetProof(currentAssistantNode, {
+      const supplementalProofResult = projectConversation ? { ok: true, proof: null } : captureSupplementalShareTargetProof(currentAssistantNode, {
         ...(Array.isArray(supplementalOptions.nodes) ? { nodes: supplementalOptions.nodes } : {}),
         ...(supplementalOptions.routeKey !== undefined ? { routeKey: supplementalOptions.routeKey } : {})
       });
@@ -11017,11 +11059,33 @@
       let saveAttempted = false;
       try {
       const artifactContainer = closestArtifactContainer(btn) || currentAssistantNode;
+      // Project file viewers may change presentation during extraction. Keep
+      // the initial deliverable inventory so disappearing controls cannot turn
+      // an incomplete capture into a silently complete local note.
+      const projectFileLinks = projectConversation
+        ? collectFileLikeLinks(artifactContainer).map(({ name, unresolved }) => ({ name, unresolved })) : [];
+      const projectArtifactRows = projectConversation
+        ? collectArtifactFileRows(artifactContainer, FILE_DELIVERABLE_EXTENSIONS).map(({ name }) => ({ name })) : [];
+      const projectPreviousQa = projectConversation && settings.usePreviousQaForHtml
+        ? previousQaFinder(currentAssistantNode) : null;
+      const projectCurrentRichExpected = projectConversation
+        ? collectRichArtifactCandidatesForStoredNote(currentAssistantNode) : [];
+      const projectPreviousRichExpected = projectConversation && projectPreviousQa
+        ? collectRichArtifactCandidatesForStoredNote(currentAssistantNode, {
+          previousQa: projectPreviousQa, usePreviousQaForHtml: true
+        }) : [];
       const generatedMarkdown = await extractGeneratedMarkdownArtifact(artifactContainer, { runtimeGuard });
       if (generatedMarkdown.runtimeUnavailable || runtimeGuard.isAborted()) {
         runtimeGuard.fail(generatedMarkdown.runtimeFailure || runtimeGuard.getFailure(), "markdown-artifact");
         runtimeGuard.notify();
         return;
+      }
+      if (projectConversation) {
+        const projectContext = validateProjectSaveContext();
+        if (!projectContext.ok) {
+          try { alertFn(saveFailureMessage(projectContext)); } catch {}
+          return projectContext;
+        }
       }
       const hintedAttachmentNames = filenamesFromText(answerText);
       const extractDownloadFilesFn = options.extractDownloadFilesFn || extractDownloadFiles;
@@ -11031,7 +11095,10 @@
         runtimeGuard.notify();
         return;
       }
-      const postArtifactProofStatus = revalidateSupplementalShareTargetProof(supplementalProof, {
+      // Project notes keep their captured local body. Opening file viewers can
+      // change rendered Markdown without changing the selected local source;
+      // only non-project Share attempts require the full Share fingerprint.
+      const postArtifactProofStatus = projectConversation ? validateProjectSaveContext() : revalidateSupplementalShareTargetProof(supplementalProof, {
         ...(Array.isArray(supplementalOptions.nodes) ? { nodes: supplementalOptions.nodes } : {}),
         ...(supplementalOptions.routeKey !== undefined ? { routeKey: supplementalOptions.routeKey } : {})
       });
@@ -11042,7 +11109,7 @@
           reason: postArtifactProofStatus?.reason || "ordinary Share target changed during artifact extraction"
         };
         try {
-          alertFn(formatI18nTemplate(t("chatGptShareFailedPrefix"), failure));
+          alertFn(saveFailureMessage(failure));
         } catch {}
         return failure;
       }
@@ -11052,10 +11119,10 @@
       const downloadedMarkdown = generatedMarkdown.downloadedMarkdown || null;
       const hasDetailedMarkdown = !!generatedMarkdown.markdown || !!downloadedMarkdown;
       const previousQa = (settings.usePreviousQaForHtml && hasRealHtmlAttachment)
-        ? previousQaFinder(currentAssistantNode)
+        ? (projectConversation ? projectPreviousQa : previousQaFinder(currentAssistantNode))
         : null;
-      const fileLinks = collectFileLikeLinks(artifactContainer);
-      const artifactRows = collectArtifactFileRows(artifactContainer, FILE_DELIVERABLE_EXTENSIONS);
+      const fileLinks = [...projectFileLinks, ...collectFileLikeLinks(artifactContainer)];
+      const artifactRows = [...projectArtifactRows, ...collectArtifactFileRows(artifactContainer, FILE_DELIVERABLE_EXTENSIONS)];
       const fileIntegrity = assessArtifactIntegrity({
         fileLinks,
         artifactRows,
@@ -11064,10 +11131,16 @@
         generatedMarkdown,
         failures: extraction.failures
       });
-      const storedRichExpected = collectRichArtifactCandidatesForStoredNote(currentAssistantNode, {
+      const currentStoredRichExpected = collectRichArtifactCandidatesForStoredNote(currentAssistantNode, {
         previousQa,
         usePreviousQaForHtml: !!settings.usePreviousQaForHtml && hasRealHtmlAttachment
       });
+      const initialStoredRichExpected = previousQa ? projectPreviousRichExpected : projectCurrentRichExpected;
+      // Candidate IDs are scoped to the saved answer and its ordinal app slot;
+      // merging by ID preserves missing slots without double-counting remounts.
+      const storedRichExpected = Array.from(new Map(
+        [...initialStoredRichExpected, ...currentStoredRichExpected].map(candidate => [candidate.id, candidate])
+      ).values());
       const richIntegrity = assessRichArtifactIntegrity({ expected: storedRichExpected, captures: [] });
       const overallIntegrity = combineCaptureIntegrity(fileIntegrity, richIntegrity);
       let allowPartialAttachments = false;
@@ -11119,7 +11192,7 @@
           title,
           questionText: noteQuestionText,
           answerText: noteAnswerText,
-          url: location.href,
+          url: projectConversation ? sourceUrl : location.href,
           attachmentMarker: marker,
           useOriginalHeadings: useOriginalQaHeadings,
           captureMetadata,
@@ -11129,7 +11202,7 @@
           title,
           questionText: noteQuestionText,
           answerText: noteAnswerText,
-          url: location.href,
+          url: projectConversation ? sourceUrl : location.href,
           attachmentMarker: "",
           captureMetadata,
           supplementalShare
@@ -11153,7 +11226,7 @@
       const linklessUri = buildObsidianURI({ vault: settings.vaultName, file: filePath, content: linklessFallbackMd });
       if (!linklessMd || !linklessFallbackMd || !/^obsidian:\/\//i.test(linklessUri)) {
         const failure = { ok: false, stage: "preflight", reason: "ordinary Markdown or URI draft could not be assembled" };
-        try { alertFn(formatI18nTemplate(t("chatGptShareFailedPrefix"), failure)); } catch {}
+        try { alertFn(saveFailureMessage(failure)); } catch {}
         return failure;
       }
 
@@ -11168,7 +11241,7 @@
         };
         const cancelled = failure.stage === "share-confirm" && /cancelled/i.test(String(failure.reason || ""));
         if (!cancelled && failure.failureAlertShown !== true) {
-          try { alertFn(formatI18nTemplate(t("chatGptShareFailedPrefix"), failure)); } catch {}
+          try { alertFn(saveFailureMessage(failure)); } catch {}
         }
         if (shareState.shareKind === "conversation" && shareState.conversationShareActionOccurred) {
           const warningKey = shareState.validatedShareUrl
@@ -11187,7 +11260,21 @@
       };
 
       const supplementalAttemptContext = {};
-      const supplementalAcquisition = await acquireSupplementalShareLink({
+      if (projectConversation && requiresNativeSave) {
+        const nativePreflightFn = options.nativePreflightFn || pingNativeHelper;
+        let nativeStatus;
+        try {
+          nativeStatus = await nativePreflightFn("project-local-preflight", { runtimeGuard });
+        } catch (error) {
+          nativeStatus = { ok: false, error: error?.message || String(error) };
+        }
+        if (!nativeStatus?.ok) {
+          return reportSupplementalFailure({ ok: false, stage: "native-preflight", reason: nativeStatus?.error || "Native helper unavailable" });
+        }
+      }
+      const supplementalAcquisition = projectConversation
+        ? { ok: true, supplementalShare: null, shareState: {} }
+        : await acquireSupplementalShareLink({
         ...supplementalOptions,
         currentAssistantNode,
         proof: supplementalProof,
@@ -11243,6 +11330,7 @@
         if (!runtimeStatus?.ok) {
           return { ok: false, stage: "runtime", reason: runtimeStatus.error || "runtime unavailable" };
         }
+        if (projectConversation) return validateProjectSaveContext();
         const proofStatus = revalidateSupplementalShareTargetProof(supplementalProof, {
           ...(Array.isArray(supplementalOptions.nodes) ? { nodes: supplementalOptions.nodes } : {}),
           ...(supplementalOptions.routeKey !== undefined ? { routeKey: supplementalOptions.routeKey } : {})

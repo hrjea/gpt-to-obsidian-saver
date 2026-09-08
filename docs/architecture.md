@@ -1,25 +1,26 @@
 # Architecture
 
-Status: public architecture overview for release v1.5.52.
+Status: public architecture overview for version v1.5.53. Validation and release delivery are recorded separately in [the release checklist](../RELEASE_CHECKLIST_v1.5.53.md).
 
 ## System context
 
 ```text
-ChatGPT page
-  -> content.js
-     -> background.js -> obsidian:// URI
-     -> background.js -> Chrome Native Messaging
-        -> native-host/native-open-obsidian.py
-        -> configured Obsidian vault
+ChatGPT project conversation
+  -> content.js -> local capture and selected-node/route/runtime guard
+  -> background.js -> existing URI or Native local-save route
 
-ChatGPT page (explicit ordinary supplemental or shared-app consent)
-  -> content.js -> current response or consented whole-conversation Share UI
+ChatGPT non-project ordinary conversation
+  -> content.js -> explicit scoped Share consent and visible Share UI
+  -> validated supplemental link + local body
+  -> background.js -> existing URI or Native local-save route
+
+ChatGPT non-project specialized shared app
+  -> content.js -> explicit scoped Share consent and visible Share UI
   -> validated ChatGPT share URL
-  -> ordinary: local body + supplemental link -> existing URI or Native route
-  -> shared app: Native Messaging -> remote-reference Markdown note
+  -> background.js -> Native Messaging -> remote-reference Markdown note
 ```
 
-There is no developer-operated application server. Extraction and note writing are local. Every ordinary save additionally invokes visible ChatGPT Share UI after explicit consent and includes a strict supplemental link. Specialized shared-app notes remain remote references; ordinary notes retain their captured local body.
+There is no developer-operated application server. Extraction and note writing are local. Recognized project conversations omit every Share flow and preserve their original source URL. Every non-project ordinary save additionally invokes visible ChatGPT Share UI after explicit consent and includes a strict supplemental link. Specialized shared-app notes remain remote references; ordinary notes retain their captured local body.
 
 ## Components and responsibilities
 
@@ -27,11 +28,11 @@ There is no developer-operated application server. Extraction and note writing a
 
 - Injects `Obsidian 저장` / `Save to Obsidian` buttons into eligible assistant messages.
 - Identifies current and previous Q&A context by verified message roles and turn structure.
-- Recovers an explicitly referenced previous Q&A across bounded, attempt-local ChatGPT turn-virtualization windows and restores the logical scroll position before Share/write boundaries.
+- For non-project specialized sharing, recovers an explicitly referenced previous Q&A across bounded, attempt-local ChatGPT turn-virtualization windows and restores the logical scroll position before Share/write boundaries.
 - Converts selected ChatGPT DOM content to Markdown.
 - Detects file-like deliverables, generated detailed Markdown, HTML artifacts, and rich app blocks.
 - Performs capture-integrity, runtime, path/assembly, and share preflight checks.
-- Builds normal, HTML learning, partial, Visualize, provider-neutral rich-app, and whole-conversation remote-reference notes.
+- Builds project local normal/HTML/partial notes without Share, non-project ordinary notes with one supplemental Share link, and supported non-project Visualize/provider-neutral remote-reference notes.
 - Requests explicit background operations implemented and tested in `background.js`.
 - Owns user consent for partial capture and sharing.
 
@@ -73,7 +74,20 @@ There is no developer-operated application server. Extraction and note writing a
 
 ## Save flows
 
+### Project conversation local flow
+
+The exemption is determined from the actual absolute HTTPS URL on the exact hosts `chatgpt.com` or `chat.openai.com`. Its path must be `/g/g-p-<32 hexadecimal characters>[-<nonempty single-segment slug>]/c/<UUID>`, where the UUID has the hexadecimal 8-4-4-4-12 form. An optional trailing slash, query or fragment is accepted. Credentials and all explicit ports, including `:443`, are rejected. Plain `/c/` conversations, custom GPTs, project home pages, fake hosts and malformed identifiers do not qualify; UI labels or `/g/` alone cannot grant the exception.
+
+1. Freeze the original full source URL, conversation route, exact connected selected assistant node, assistant role and `data-message-id`. Keep the selected local answer rather than substituting text from a subsequently opened viewer.
+2. Bypass supplemental full-Markdown/provenance proof, Share acquisition/consent, clipboard permission/read, manual Share-URL entry and every structured Visualize or provider-neutral remote-reference dispatch. Add no extension-generated Share metadata, link or body section.
+3. Capture HTML and exact generated detailed Markdown through the existing page/viewer or bounded current-download path. Preserve initial expected file and app evidence across extraction, so a disappearing card or preview cannot silently make an incomplete capture complete. Rich expectations follow the actual current or explicitly selected previous-Q&A answer body being stored.
+4. Keep the existing explicit partial-save decision for missing local files or apps. Incomplete rich apps cancel by default; approved partial notes retain `capture_status: partial`, truthful expected/complete counts, `interactive_behavior_preserved: false` and a permanent warning. They never claim a copied local app or a remote reference from a skipped Share action.
+5. Revalidate the route, exact selected-node connection/role/ID and runtime at initial, post-artifact and final write/fallback boundaries. A replacement node fails even if it reuses the same ID. The existing route key includes query parameters and ignores the fragment; the saved source remains the original full URL.
+6. Retain existing URI/Native transport, required Native preflight, Vault-contained writes, payload limits, markers and attachment audit. Permitted fallback reruns the local guard; downloaded detailed Markdown still has no URI fallback. URI dispatch does not prove a Vault file exists.
+
 ### 1. Normal Markdown / URI-capable flow
+
+This supplemental Share flow applies to non-project conversations.
 
 1. User clicks Save on an assistant response.
 2. Content script resolves nearest Q and the selected answer; intervening assistant turns are ordered provenance only. It freezes identity, route and content proof and converts only the selected current Q/A.
@@ -83,20 +97,22 @@ There is no developer-operated application server. Extraction and note writing a
 
 ### 2. HTML and generated-file Native flow
 
-1. Content script inventories visible file and rich-artifact expectations.
+1. Content script inventories visible file and rich-artifact expectations; project saves retain initial expectations and match rich content to the actual selected current/previous-Q&A body.
 2. It reads page-accessible HTML or a unique detailed Markdown viewer when possible.
 3. If required, it starts a bounded exact-current download watch before asking for the one real user click.
 4. It compares expected and captured deliverables.
 5. Missing content cancels by default; supported partial capture requires explicit consent.
-6. Runtime checks complete before the final save; Native-only artifact flows require the configured Vault path/helper.
+6. Runtime checks complete before the final save; Native-only artifact flows require the configured Vault path/helper and Native preflight. Non-project ordinary artifacts then require one consented, validated supplemental Share link; project artifacts omit that stage.
 7. Native helper validates and writes attachments, replaces markers, writes the note, and returns an audit.
 8. Content script rejects a non-partial result whose requested/written audit is incomplete.
 
 ### 3. Interactive rich-app partial flow
 
-When an app block has no verified complete local representation and no approved remote-reference path, the extension cancels by default. If the user explicitly accepts partial capture, only readable outer text and verified files are saved with permanent `capture_status: partial` metadata and a warning. The iframe/app shell is not represented as a local copy.
+When an app block has no verified complete local representation and no approved remote-reference path, the extension cancels by default. If the user explicitly accepts partial capture, only readable outer text and verified files are saved with permanent `capture_status: partial` metadata and a warning. The iframe/app shell is not represented as a local copy. All project rich-app variants use this local completeness/partial decision instead of specialized Share. Non-project approved partial notes also require the ordinary supplemental Share consent and validated link before dispatch.
 
 ### 4. Response-scoped remote-reference flow
+
+Recognized project conversations never enter this flow.
 
 1. Resolve structured `previous-qa` or `direct-visualize`, provider-neutral `previous-qa-rich-app`, or provider-neutral `rich-app-continuation` context. Text or history alone never proves a provider.
 2. Freeze the selected Q2/A2 identity, content, app/runtime proof, route, and production conversation scroller. Explicit previous-answer requests may join only the approved adjacent virtualized windows through exact role/content/identity overlap.
@@ -111,7 +127,7 @@ When an app block has no verified complete local representation and no approved 
 
 ### 5. Whole-conversation remote-reference fallback
 
-This fallback is broader than response sharing and has a separate consent boundary.
+This fallback is available only outside recognized project conversations, is broader than response sharing and has a separate consent boundary.
 
 1. It is considered only when the response-scoped trigger is missing, not when that trigger is ambiguous.
 2. The exact visible header `[data-testid='share-chat-button']` must be unique and revalidated before click.
@@ -123,11 +139,11 @@ This fallback is broader than response sharing and has a separate consent bounda
 
 ### ChatGPT DOM
 
-ChatGPT page structure is untrusted and changes over time. Role, turn, file, viewer, app, toolbar, dialog, status, and URL candidates must be structurally validated and unique. One mounted DOM window is not assumed to contain the complete chronology; virtualized windows may be joined only through exact bounded overlap proof. A detached A1 conversion clone and a following-turn geometry anchor cannot operate Share UI or establish chronology. Response Share portal/remount evidence is attempt-local. Text similarity alone is not sufficient provenance.
+ChatGPT page structure is untrusted and changes over time. Selection, artifact, control and URL evidence is validated within the active local-capture or Share boundary. Project local saves use the exact selected-node/role/ID, route and runtime guard above rather than supplemental full-content/provenance fingerprints. For non-project specialized sharing, one mounted DOM window is not assumed to contain the complete chronology; virtualized windows may be joined only through exact bounded overlap proof. A detached A1 conversion clone and a following-turn geometry anchor cannot operate Share UI or establish chronology. Response Share portal/remount evidence is attempt-local. Text similarity alone is not sufficient provenance.
 
 ### Clipboard
 
-Clipboard access is optional. It is requested only during an approved Share flow after an immediate runtime/current-context guard, and may be read once only after a fresh strict success signal. A verified missing-only hydration window skips the request and never triggers it automatically after recovery. Raw values are not logged or persisted; only a validated URL may enter a note.
+Project saves do not request or read the clipboard. Outside project conversations, clipboard access is optional. It is requested only during an approved Share flow after an immediate runtime/current-context guard, and may be read once only after a fresh strict success signal. A verified missing-only hydration window skips the request and never triggers it automatically after recovery. Raw values are not logged or persisted; only a validated URL may enter a note.
 
 ### Background service worker
 
@@ -160,4 +176,4 @@ Current public boundaries include a 16 MiB Native message ceiling, at most 100 H
 - Native writes remain Vault-bounded and return attachment/note audit metadata.
 - Missing or ambiguous message, artifact, Share, or URL candidates fail closed instead of selecting a fallback by similarity.
 
-HTML learning, generated detailed Markdown and approved partial notes also require the ordinary supplemental consent and strict link before their existing Native dispatch. The explicit HTML previous-Q&A option preserves that previous pair and headings; Share still targets the clicked current response. Conversation fallback is missing-only and separately consented, never an ambiguity fallback.
+Non-project HTML learning, generated detailed Markdown and approved partial notes also require the ordinary supplemental consent and strict link before their existing URI/Native dispatch. Project equivalents omit Share while retaining artifact and partial-consent checks. The explicit HTML previous-Q&A option preserves that previous pair and headings; for non-project notes, Share still targets the clicked current response. Conversation fallback is missing-only and separately consented, never an ambiguity fallback.

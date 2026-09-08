@@ -23,15 +23,17 @@ GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 �
 - 현재 저장 동작에 안전하게 대응하는 생성된 상세 Markdown artifact 하나를 확인하거나 다운로드할 수 있으면 노트에 보존합니다.
 - 실제 HTML 첨부가 있는 노트는 HTML 학습자료 섹션을 노트 상단에 배치합니다.
 - HTML 학습자료 저장 시 이전 Q&A를 사용하는 옵션을 제공합니다.
-- 지원되는 상호작용형 앱 답변을 엄격히 검증한 ChatGPT Share URL 기반의 동의된 Native-only 원격 참조로 저장합니다.
+- 프로젝트 밖의 지원되는 상호작용형 앱 답변을 엄격히 검증한 ChatGPT Share URL 기반의 동의된 Native-only 원격 참조로 저장합니다.
 - 바로 이전 답변을 명시한 Visualize 요청과 독립적인 direct Visualize 요청을 구분하고, turn 또는 Share 증거가 모호하면 중단합니다.
 - 영어/한국어 UI를 제공합니다.
 
-릴리스 1.5.52은 명시적으로 승인한 partial rich-app 노트와 Native-only 원격 참조를 구분하고, provider provenance를 정확히 유지하며, ChatGPT의 가상화·remount turn 및 응답 Share surface를 제한된 범위에서 처리합니다. 현재 동작과 신뢰 경계는 [공개 architecture](docs/architecture.md)를 참고하세요.
+버전 1.5.53은 프로젝트 대화를 Share 없이 로컬로 저장합니다. 프로젝트 밖의 보조 Share와 특수 원격 참조 흐름은 기존 동의·대상·artifact·전송 검증을 유지합니다. 현재 동작과 신뢰 경계는 [공개 architecture](docs/architecture.md)를 참고하세요.
 
 ## 일반 노트의 보조 Share 동의
 
-일반 저장에도 ChatGPT 보조 공유링크를 위한 명시적 동의가 필요합니다. 동의 거절, URL 검증 실패 또는 대상 모호성이 있으면 저장을 중단하며 링크 없는 노트를 대신 만들지 않습니다. 응답 공유는 선택한 답변을 대상으로 합니다. 응답 공유가 없는 경우에만 별도 동의를 받는 전체 대화 공유를 제공하며 더 넓은 대화 내용이 공개될 수 있습니다. 기존 로컬 Q/A·HTML·상세 Markdown과 URI/Native 저장 경계는 유지합니다.
+버전 1.5.53에서는 URL로 확인된 ChatGPT 프로젝트 대화를 Share 동의나 공유링크 없이 로컬로 저장합니다. 원래 출처 URL, HTML·상세 Markdown 수집, 필요한 부분 저장 동의는 유지합니다. 로컬 콘텐츠가 부족한 프로젝트 앱은 명시적으로 승인한 부분 노트와 영구 경고로만 저장할 수 있습니다.
+
+프로젝트 밖의 일반 저장에는 ChatGPT 보조 공유링크를 위한 명시적 동의가 필요합니다. 동의 거절, URL 검증 실패 또는 대상 모호성이 있으면 저장을 중단하며 링크 없는 노트를 대신 만들지 않습니다. 응답 공유는 선택한 답변을 대상으로 합니다. 응답 공유가 없는 경우에만 별도 동의를 받는 전체 대화 공유를 제공하며 더 넓은 대화 내용이 공개될 수 있습니다. 기존 로컬 Q/A·HTML·상세 Markdown과 URI/Native 저장 경계는 유지합니다.
 
 Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 저장합니다. A1/A2를 합치지 않으며 HTML 이전 Q/A 옵션은 별도로 유지합니다.
 
@@ -39,7 +41,7 @@ Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 
 
 | 플랫폼 | 상태 |
 | --- | --- |
-| Chrome on macOS | URI mode와 native-helper mode가 검증되었습니다. |
+| Chrome on macOS | URI mode와 native-helper mode를 지원하며 이전 버전의 실제 검증 기록이 있습니다. 1.5.53은 원래 프로젝트 저장의 사용자 성공 보고가 있으며, 에이전트의 새 Native/Vault 검사와 격리 패키지 로드는 실행하지 않았습니다. |
 | Chrome on Windows | Obsidian URI 처리가 동작하면 URI mode는 사용할 수 있습니다. Native-helper support는 Experimental이며 이번 릴리스에서 실제 Windows 환경 검증은 하지 않았습니다. |
 | Linux | 로컬 URI 처리 상태에 따라 URI mode는 동작할 수 있습니다. Native-helper mode는 지원하지 않습니다. |
 
@@ -47,13 +49,13 @@ Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 
 
 현재 이 프로젝트는 GitHub Releases를 통해서만 배포되며, Chrome의 Load unpacked 기능으로 설치합니다.
 
-아래에서 설명하는 최신 태그·공개 패키지는 v1.5.52입니다. 설치 전에 릴리스 checksum을 확인하세요.
+아래 설치 안내는 v1.5.53을 대상으로 합니다. 설치 전에 게시된 릴리스 버전과 checksum을 확인하세요.
 
 Chrome Web Store에서는 제공되지 않습니다. Chrome Web Store 설치, listing, review, 자동 업데이트 동작을 기대하면 안 됩니다.
 
 ## GitHub Releases에서 설치
 
-1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.52-unpacked-extension.zip`을 다운로드합니다.
+1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.53-unpacked-extension.zip`을 다운로드합니다.
 2. `SHA256SUMS.txt`로 SHA-256 checksum을 확인합니다.
 3. ZIP 파일을 압축 해제합니다.
 4. `chrome://extensions`를 엽니다.
@@ -99,7 +101,7 @@ Native host의 allowed origin은 Chrome에 표시되는 실제 extension ID와 �
 ### macOS Native Helper
 
 1. `chrome://extensions`에서 extension ID를 복사합니다.
-2. `gpt-to-obsidian-saver-v1.5.52-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
+2. `gpt-to-obsidian-saver-v1.5.53-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
 3. 다음을 실행합니다.
 
 ```sh
@@ -204,7 +206,7 @@ PowerShell:
 
 확장 프로그램은 사용자가 Save to Obsidian을 클릭했을 때 ChatGPT 페이지 내용을 로컬에서 처리합니다. 설정은 Chrome extension storage에 저장되고, 데이터는 Obsidian URI mode 또는 Chrome Native Messaging을 통해 로컬에 저장됩니다. 분석, telemetry, tracking, 개발자 운영 원격 저장소, 사용자 데이터 판매 기능은 추가하지 않습니다.
 
-확장 프로그램에는 명시적 동의를 받는 원격 공유 절차가 있습니다. 일반 노트에는 로컬 본문에 보조 Share 링크를 추가합니다. 별도 동의 후 ChatGPT의 화면 Share UI를 조작하고 검증된 ChatGPT 공유 URL을 온라인 전용 참조로 저장할 수 있습니다. Vault 노트나 첨부파일을 개발자 서비스로 업로드하지 않으며, 공유 앱을 로컬 복사본이라고 표시하지 않습니다.
+확장 프로그램에는 명시적 동의를 받는 원격 공유 절차가 있습니다. 프로젝트 밖의 일반 노트에는 로컬 본문에 보조 Share 링크를 추가합니다. 별도 동의 후 ChatGPT의 화면 Share UI를 조작하고 검증된 ChatGPT 공유 URL을 온라인 전용 참조로 저장할 수 있습니다. Vault 노트나 첨부파일을 개발자 서비스로 업로드하지 않으며, 공유 앱을 로컬 복사본이라고 표시하지 않습니다.
 
 현재 페이지 URL은 노트 source로 기록될 수 있습니다. Native-helper mode는 설정된 로컬 vault path를 사용해 노트와 첨부파일을 씁니다.
 

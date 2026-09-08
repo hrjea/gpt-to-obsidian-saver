@@ -14,7 +14,9 @@ Selected public-safe screenshots are also available in [assets/screenshots](asse
 
 ## Supplemental Share consent
 
-Every ordinary save now requires explicit consent for a supplemental ChatGPT Share link. Declining consent, an invalid URL or ambiguous target cancels the save; the extension does not silently create a link-less note. Response sharing targets the selected answer. A separately consented whole-conversation fallback is available only when response sharing is missing, and may expose broader conversation content. Local Q/A, HTML and generated-file content keep their existing URI/Native routes.
+In version 1.5.53, recognized ChatGPT project conversations save locally without Share consent or a share link. They retain the original source URL, HTML/detailed-Markdown capture and required partial-save consent. Project apps without complete local artifacts can only be saved as explicitly approved partial notes with a permanent warning.
+
+Every non-project ordinary save requires explicit consent for a supplemental ChatGPT Share link. Declining consent, an invalid URL or ambiguous target cancels the save; the extension does not silently create a link-less note. Response sharing targets the selected answer. A separately consented whole-conversation fallback is available only when response sharing is missing, and may expose broader conversation content. Local Q/A, HTML and generated-file content keep their existing URI/Native routes.
 
 For Q → A1 → A2 → A3, selecting A3 saves Q plus A3 only; A1/A2 are selection evidence, not combined answer content. The explicit HTML previous-Q&A option remains separate.
 
@@ -29,17 +31,17 @@ For Q → A1 → A2 → A3, selecting A3 saves Q plus A3 only; A1/A2 are selecti
 - Preserves one exact generated detailed-Markdown artifact in the note when it can be safely resolved or downloaded for the current save.
 - Places the HTML learning-material section at the top of notes that contain real HTML attachments.
 - Optionally uses the previous Q&A pair when saving HTML learning notes.
-- Saves supported interactive-app responses as consented, Native-only remote references backed by a strictly validated ChatGPT Share URL.
+- Saves supported non-project interactive-app responses as consented, Native-only remote references backed by a strictly validated ChatGPT Share URL.
 - Keeps explicit previous-answer Visualize requests separate from independent direct Visualize requests, and fails closed on ambiguous turn or Share evidence.
 - Provides English and Korean UI labels.
 
-Release 1.5.52 distinguishes explicitly approved partial rich-app notes from Native-only remote references, preserves truthful provider provenance, and adds bounded handling for ChatGPT's virtualized/remounted turns and response Share surfaces. See [the public architecture](docs/architecture.md) for the current behavior and trust boundaries.
+Version 1.5.53 adds project-conversation saving without Share. Non-project supplemental Share and specialized remote-reference flows retain their consent, target, artifact and transport safeguards. See [the public architecture](docs/architecture.md) for the current behavior and trust boundaries.
 
 ## Supported Platforms
 
 | Platform | Status |
 | --- | --- |
-| Chrome on macOS | Supported for URI mode and validated for native-helper mode. |
+| Chrome on macOS | Supported for URI mode and native-helper mode, with historical live validation. For 1.5.53, the original project save has a user-reported success; fresh agent-inspected Native/Vault and isolated package-load checks were not run. |
 | Chrome on Windows | URI mode should work when Obsidian URI handling works. Native-helper support is Experimental and has not been validated on a real Windows machine for this release. |
 | Linux | Obsidian URI mode may work depending on local URI handling. Native-helper mode is unsupported. |
 
@@ -47,13 +49,13 @@ Release 1.5.52 distinguishes explicitly approved partial rich-app notes from Nat
 
 The project is currently distributed through GitHub Releases only. It is installed as an unpacked Chrome extension.
 
-The latest tagged/public package documented below is v1.5.52. Verify the release checksums before installation.
+The installation instructions below target v1.5.53. Verify the published release version and checksums before installation.
 
 This project is not available through the Chrome Web Store. Do not expect Chrome Web Store installation, listing, review, or automatic update behavior.
 
 ## Install from GitHub Releases
 
-1. Download `gpt-to-obsidian-saver-v1.5.52-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.53-unpacked-extension.zip` from the GitHub Release.
 2. Verify the SHA-256 checksum from `SHA256SUMS.txt`.
 3. Unzip the file.
 4. Open `chrome://extensions`.
@@ -99,7 +101,7 @@ The native host allowed origin must match the actual extension ID shown by Chrom
 ### macOS Native Helper
 
 1. Copy the extension ID from `chrome://extensions`.
-2. Download and unzip `gpt-to-obsidian-saver-v1.5.52-native-host-macos.zip`.
+2. Download and unzip `gpt-to-obsidian-saver-v1.5.53-native-host-macos.zip`.
 3. Run:
 
 ```sh
@@ -204,7 +206,7 @@ See [docs/permissions.md](docs/permissions.md).
 
 The extension processes ChatGPT page content locally when the user clicks Save to Obsidian. It stores settings in Chrome extension storage and saves notes locally through Obsidian URI mode or Chrome Native Messaging. It does not add analytics, telemetry, tracking, developer-operated remote storage, or data sale behavior.
 
-The extension has explicit consented remote-sharing flows: after separate consent, it may operate ChatGPT's visible Share UI and store a validated ChatGPT share URL as an online-only reference. It does not upload Vault notes or attachments to a developer service, and it does not claim the shared app is a local copy.
+Outside recognized project conversations, the extension has explicit consented remote-sharing flows: it may operate ChatGPT's visible Share UI and add a validated supplemental link to a local ordinary note, or store a specialized interactive-app remote reference after separate consent. It does not upload Vault notes or attachments to a developer service, and it does not claim the shared app is a local copy.
 
 The current page URL can be recorded as the note source. Native-helper mode uses the configured local vault path to write notes and attachments.
 

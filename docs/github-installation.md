@@ -4,12 +4,12 @@ This project is distributed through GitHub Releases and installed with Chrome's 
 
 ## Install the Extension
 
-1. Download `gpt-to-obsidian-saver-v1.5.52-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.53-unpacked-extension.zip` from the GitHub Release.
 2. Download `SHA256SUMS.txt`.
 3. Verify the checksum:
 
 ```sh
-shasum -a 256 gpt-to-obsidian-saver-v1.5.52-unpacked-extension.zip
+shasum -a 256 gpt-to-obsidian-saver-v1.5.53-unpacked-extension.zip
 ```
 
 Compare the result with `SHA256SUMS.txt`.
@@ -19,7 +19,7 @@ Compare the result with `SHA256SUMS.txt`.
 6. Enable Developer mode.
 7. Select Load unpacked.
 8. Select the unzipped folder containing `manifest.json`.
-9. Confirm the displayed version is `1.5.52`.
+9. Confirm the displayed version is `1.5.53`.
 
 Chrome may warn about developer-mode extensions because this is an unpacked GitHub installation.
 
@@ -64,6 +64,8 @@ Open the extension options page and configure:
 - Previous-Q&A option for HTML learning notes.
 
 Refresh existing ChatGPT tabs after changing extension versions or reloading the extension.
+
+For non-project conversations, ordinary Markdown and HTML saves require separate ChatGPT Share consent before note creation; cancelling creates no note. Recognized project conversations save without Share while retaining any required local partial-save consent.
 
 ## Test Normal Markdown Saving
 

@@ -45,7 +45,7 @@ function loadHooks({ syncState = {} } = {}) {
         lastError: null,
         sendMessage: (message, callback) => callback?.(
           message?.type === "gpt2obs-runtime-ping"
-            ? { ok: true, pong: true, version: "1.5.52" }
+            ? { ok: true, pong: true, version: "1.5.53" }
             : { ok: true }
         )
       }
@@ -733,6 +733,8 @@ function makeHandleCopyFixture(hooks, {
     events,
     nodes: {
       root,
+      appBlock,
+      appFrame,
       questionNode,
       container,
       questionTurn,
@@ -776,7 +778,7 @@ function makeHandleCopyFixture(hooks, {
 
 async function main() {
   const hooks = loadHooks();
-  assert.strictEqual(hooks.VERSION, "1.5.52");
+  assert.strictEqual(hooks.VERSION, "1.5.53");
   const assertOrdinaryResponseSupplementalSchema = (markdown, shareUrl, label) => {
     assert.strictEqual((markdown.match(/^# (?:ChatGPT Share|ChatGPT 공유)$/gm) || []).length, 1, `${label} must contain exactly one supplemental block`);
     assert.strictEqual((markdown.match(/^chatgpt_share_url:/gm) || []).length, 1, `${label} must contain exactly one response URL field`);
@@ -1067,6 +1069,411 @@ async function main() {
   assert.strictEqual(hooks.isDuplicateContentSave(reservationKey), false, "cancelling must allow an immediate retry");
   hooks.clearContentSaveReservation(reservationKey);
   hooks.setTestLanguage("en");
+
+  const projectPath = "/g/g-p-0123456789abcdef0123456789abcdef-synthetic-project/c/11111111-2222-4333-8444-555555555555";
+  const setProjectRoute = () => {
+    const sourceUrl = `https://chatgpt.com${projectPath}?synthetic-case=${handleFixtureSequence}`;
+    hooks.__sandbox.location.href = sourceUrl;
+    return sourceUrl;
+  };
+  const assertProjectHasNoShare = (fixture, markdown = "") => {
+    assert.strictEqual(fixture.events.shareConsents, 0, "project saves must not request Share consent");
+    assert.strictEqual(fixture.events.permissions, 0, "project saves must not request clipboard permission");
+    assert.strictEqual(fixture.events.shares.length, 0, "project saves must not operate Share");
+    [
+      "chatgpt_share_url:", "conversation_share_url:", "share_scope:", "target_turn_id:",
+      "visualize_share_url:", "rich_app_share_url:", "# ChatGPT Share", "# ChatGPT 공유",
+      "capture_status: remote-reference", "interactive_behavior_preserved: remote-only",
+      "rich_artifacts_remote_referenced:", "offline_available:"
+    ].forEach(fragment => assert(!markdown.includes(fragment), `project local note must omit ${fragment}`));
+  };
+
+  {
+    const fixture = makeHandleCopyFixture(hooks, {
+      rich: false,
+      question: "PROJECT-Q",
+      outer: "PROJECT-A3-SELECTED",
+      selectedAssistantId: "project-a3",
+      interveningAssistants: [
+        { id: "project-a1", text: "PROJECT-A1-PROVENANCE" },
+        { id: "project-a2", text: "PROJECT-A2-PROVENANCE" }
+      ]
+    });
+    try {
+      const sourceUrl = setProjectRoute(fixture);
+      const result = await fixture.run({
+        supplementalSharePlan: { status: "unavailable", kind: "none", control: null, reason: "no Share control" }
+      });
+      assert.strictEqual(fixture.events.opens.length, 1, `project conversation without Share must dispatch its local URI note: ${result?.reason || result?.stage || "unknown failure"}`);
+      assert.strictEqual(fixture.events.saves.length, 0);
+      assert.strictEqual(fixture.events.shareConsents, 0);
+      assert.strictEqual(fixture.events.permissions, 0);
+      assert.strictEqual(fixture.events.shares.length, 0);
+      const markdown = new URL(fixture.events.opens[0].uri).searchParams.get("content");
+      assert(markdown.includes(`source: ${JSON.stringify(sourceUrl)}`));
+      assert(markdown.includes("PROJECT-Q"));
+      assert(markdown.includes("PROJECT-A3-SELECTED"));
+      assert(!markdown.includes("PROJECT-A1-PROVENANCE"));
+      assert(!markdown.includes("PROJECT-A2-PROVENANCE"));
+      assertProjectHasNoShare(fixture, markdown);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false, outer: "PROJECT DOM answer without clipboard" });
+    const originalReadText = hooks.__sandbox.navigator.clipboard.readText;
+    let clipboardReads = 0;
+    try {
+      setProjectRoute(fixture);
+      hooks.__sandbox.navigator.clipboard.readText = async () => {
+        clipboardReads += 1;
+        return "Unrelated clipboard content";
+      };
+      await fixture.run({ preferClipboard: true });
+      assert.strictEqual(clipboardReads, 0, "project local saving must ignore the legacy clipboard preference without reading unrelated clipboard content");
+      assert.strictEqual(fixture.events.opens.length, 1);
+      const markdown = new URL(fixture.events.opens[0].uri).searchParams.get("content");
+      assert(markdown.includes("PROJECT DOM answer without clipboard"));
+      assert(!markdown.includes("Unrelated clipboard content"));
+      assertProjectHasNoShare(fixture, markdown);
+    } finally {
+      hooks.__sandbox.navigator.clipboard.readText = originalReadText;
+      fixture.restore();
+    }
+  }
+
+  for (const url of [
+    `https://chatgpt.com${projectPath}`,
+    `https://chatgpt.com${projectPath}/?view=synthetic`,
+    `https://chat.openai.com${projectPath}`,
+    "https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef/c/11111111-2222-4333-8444-555555555555"
+  ]) {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false });
+    try {
+      hooks.__sandbox.location.href = url;
+      await fixture.run();
+      assert.strictEqual(fixture.events.opens.length, 1, `recognized project route must save locally even when Share is available: ${url}`);
+      assert.strictEqual(fixture.events.saves.length, 0);
+      assertProjectHasNoShare(fixture, new URL(fixture.events.opens[0].uri).searchParams.get("content"));
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  for (const url of [
+    "https://chatgpt.com/c/synthetic-ordinary",
+    "https://chatgpt.com/g/g-synthetic-custom-gpt/c/11111111-2222-4333-8444-555555555555",
+    "https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef-synthetic-project/project",
+    "https://chatgpt.com/g/g-p-short/c/11111111-2222-4333-8444-555555555555",
+    "https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef/c/not-a-conversation-id",
+    `https://chatgpt.com${projectPath}/extra`,
+    `http://chatgpt.com${projectPath}`,
+    `https://chatgpt.com.example${projectPath}`,
+    `https://chatgpt.com:8443${projectPath}`,
+    `https://chatgpt.com:443${projectPath}`,
+    `https://user@chatgpt.com${projectPath}`,
+    `https://chatgpt.com/?next=${encodeURIComponent(projectPath)}`
+  ]) {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false });
+    try {
+      hooks.__sandbox.location.href = url;
+      await fixture.run({
+        supplementalSharePlan: { status: "unavailable", kind: "none", control: null, reason: "no Share control" }
+      });
+      assert.strictEqual(fixture.events.opens.length, 0, `nonproject or malformed route must retain mandatory Share: ${url}`);
+      assert.strictEqual(fixture.events.saves.length, 0);
+      assert.strictEqual(fixture.events.alerts.length, 1);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false, html: true, outer: "PROJECT frozen answer before file viewer" });
+    try {
+      setProjectRoute(fixture);
+      await fixture.run({
+        extractDownloadFilesFn: async (...args) => {
+          const extraction = await hooks.extractDownloadFiles(...args);
+          fixture.nodes.container.innerText = "viewer now displays actual.html and Download";
+          fixture.nodes.container.textContent = "viewer now displays actual.html and Download";
+          return extraction;
+        },
+        saveObsidianNoteFn: undefined
+      });
+      assert.strictEqual(fixture.events.saves.length, 1, "project HTML must survive file-viewer presentation changes and dispatch through the real Native wrapper");
+      assert.strictEqual(fixture.events.opens.length, 0);
+      const payload = fixture.events.saves[0].payload;
+      assert.deepStrictEqual(Array.from(payload.attachmentNames), ["actual.html"]);
+      assert.strictEqual(payload.attachments.length, 1);
+      assert(payload.attachments[0].content.includes("complete body"));
+      assert.strictEqual((payload.content.match(/%%GPT_OBSIDIAN_ATTACHMENTS%%/g) || []).length, 1);
+      assert(payload.content.includes("PROJECT frozen answer before file viewer"));
+      assert(!payload.content.includes("viewer now displays"));
+      assertProjectHasNoShare(fixture, payload.content);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  for (const previousAnswerHasApp of [false, true]) {
+    const htmlHooks = loadHooks({ syncState: { usePreviousQaForHtml: true, prefixDate: false, uiLanguage: "en" } });
+    const fixture = makeHandleCopyFixture(htmlHooks, { rich: !previousAnswerHasApp, html: true, previousQa: true });
+    let previousAppVisible = previousAnswerHasApp;
+    const previousAppBlock = { remove() {} };
+    const previousQuerySelectorAll = fixture.nodes.previousAnswer.node.querySelectorAll;
+    fixture.nodes.previousAnswer.node.querySelectorAll = selector => selector === '[data-app-block-preview="true"]' && previousAppVisible
+      ? [previousAppBlock] : previousQuerySelectorAll(selector);
+    const runWithPreviousAppDisappearance = () => fixture.run({
+      // This harness has no HTML parser; use the existing resolved-Q/A seam
+      // while keeping the live stored-answer inventory and extraction real.
+      findPreviousQaPairFn: () => ({
+        questionNode: fixture.nodes.previousQuestion.node,
+        answerNode: fixture.nodes.previousAnswer.node,
+        requestNode: fixture.nodes.questionNode,
+        questionText: "original earlier question",
+        answerText: "original earlier answer"
+      }),
+      extractDownloadFilesFn: async (...args) => {
+        const extraction = await htmlHooks.extractDownloadFiles(...args);
+        previousAppVisible = false;
+        return extraction;
+      }
+    });
+    try {
+      htmlHooks.__sandbox.location.href = `https://chatgpt.com${projectPath}?synthetic-case=${handleFixtureSequence}`;
+      await runWithPreviousAppDisappearance();
+      if (previousAnswerHasApp) {
+        assert.strictEqual(fixture.events.confirms, 1, "an app disappearing from the saved previous answer must retain its initial partial-capture requirement");
+        assert.strictEqual(fixture.events.saves.length, 0, "declining missing previous-answer app content must stop the HTML note");
+        previousAppVisible = true;
+        fixture.setApprove(true);
+        await runWithPreviousAppDisappearance();
+        assert.strictEqual(fixture.events.confirms, 2);
+      } else {
+        assert.strictEqual(fixture.events.confirms, 0, "an app only in the clicked answer must not make the app-free saved previous answer partial");
+      }
+      assert.strictEqual(fixture.events.saves.length, 1, "project previous-Q/A HTML must preserve Native dispatch");
+      assert.strictEqual(fixture.events.opens.length, 0);
+      const payload = fixture.events.saves[0].payload;
+      assert(payload.content.includes("# Original Question"));
+      assert(payload.content.includes("# Original Answer"));
+      assert(payload.content.includes("original earlier question"));
+      assert(payload.content.includes("original earlier answer"));
+      assert(!payload.content.includes("ordinary selected question"));
+      assert(!payload.content.includes("outer explanation"));
+      assert.deepStrictEqual(Array.from(payload.attachmentNames), ["actual.html"]);
+      assert.strictEqual(payload.content.includes("capture_status: partial"), previousAnswerHasApp);
+      if (previousAnswerHasApp) {
+        assert(payload.content.includes("rich_artifacts_expected: 1"));
+        assert(payload.content.includes("rich_artifacts_complete: 0"));
+        assert(payload.content.includes("Interactive app block not saved"));
+      }
+      assertProjectHasNoShare(fixture, payload.content);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  for (const downloadedDetailedMarkdown of [false, true]) {
+    const fixture = makeHandleCopyFixture(hooks, {
+      rich: false,
+      detailedMarkdown: "# 장별 상세 한국어 요약\n\nPROJECT generated detail",
+      downloadedDetailedMarkdown
+    });
+    try {
+      setProjectRoute(fixture);
+      await fixture.run();
+      assert.strictEqual(fixture.events.saves.length, 1, "project detailed Markdown must retain Native transport");
+      assert.strictEqual(fixture.events.opens.length, 0);
+      const payload = fixture.events.saves[0].payload;
+      assert.strictEqual((payload.content.match(/^# 장별 상세 한국어 요약$/gm) || []).length, 1);
+      if (downloadedDetailedMarkdown) {
+        assert(payload.downloadedMarkdown.sourcePath.endsWith("synthetic-chapter-detailed-summary.md"));
+        assert.strictEqual((payload.content.match(/%%GPT_OBSIDIAN_DETAILED_MARKDOWN%%/g) || []).length, 1);
+      } else {
+        assert(payload.content.includes("PROJECT generated detail"));
+      }
+      assertProjectHasNoShare(fixture, payload.content);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  for (const mutation of [
+    { label: "route switch", apply: () => { hooks.__sandbox.location.href = "https://chatgpt.com/c/synthetic-other-conversation"; } },
+    { label: "selected node disconnected", apply: fixture => { fixture.nodes.container.isConnected = false; } },
+    { label: "selected role changed", apply: fixture => {
+      const original = fixture.nodes.container.getAttribute;
+      fixture.nodes.container.getAttribute = name => name === "data-message-author-role" ? "user" : original(name);
+    } },
+    { label: "selected message ID changed", apply: fixture => {
+      const original = fixture.nodes.container.getAttribute;
+      fixture.nodes.container.getAttribute = name => name === "data-message-id" ? "project-replaced-a1" : original(name);
+    } }
+  ]) {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false, html: true });
+    try {
+      setProjectRoute(fixture);
+      await fixture.run({ extractDownloadFilesFn: async (...args) => {
+        const extraction = await hooks.extractDownloadFiles(...args);
+        mutation.apply(fixture);
+        return extraction;
+      } });
+      assert.strictEqual(fixture.events.saves.length, 0, `${mutation.label} during file extraction must stop the project Native write`);
+      assert.strictEqual(fixture.events.opens.length, 0);
+      assertProjectHasNoShare(fixture);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  for (const html of [false, true]) {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false, html });
+    let finalGuardReached = false;
+    try {
+      setProjectRoute(fixture);
+      await fixture.run({ runtimeGuard: {
+        checkSync: phase => ({ ok: true, phase }),
+        check: async phase => {
+          if (phase.endsWith("before-save")) {
+            finalGuardReached = true;
+            fixture.nodes.container.isConnected = false;
+          }
+          return { ok: true, phase };
+        },
+        isAborted: () => false,
+        getFailure: () => null,
+        fail: result => result,
+        notify() {}
+      } });
+      assert(finalGuardReached, "project fixture must reach the final awaited runtime boundary");
+      assert.strictEqual(fixture.events.saves.length, 0, "selected-node loss during final runtime await must block Native");
+      assert.strictEqual(fixture.events.opens.length, 0, "selected-node loss during final runtime await must block URI");
+      assertProjectHasNoShare(fixture);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false });
+    const originalQuerySelectorAll = fixture.nodes.container.querySelectorAll;
+    let fileVisible = true;
+    const missingFileLink = {
+      innerText: "missing.html", textContent: "missing.html",
+      getAttribute: () => "", hasAttribute: () => false, closest: () => null
+    };
+    fixture.nodes.container.querySelectorAll = selector => selector === "a, [role='link']" && fileVisible
+      ? [missingFileLink] : originalQuerySelectorAll(selector);
+    try {
+      setProjectRoute(fixture);
+      assert.deepStrictEqual(Array.from(hooks.collectFileLikeLinks(fixture.nodes.container), link => link.name), ["missing.html"], "fixture must initially expose one href-less expected HTML file");
+      await fixture.run({ extractDownloadFilesFn: async (...args) => {
+        const extraction = await hooks.extractDownloadFiles(...args);
+        fileVisible = false;
+        return extraction;
+      } });
+      assert.strictEqual(fixture.events.confirms, 1, "a project file present at click time must still require partial consent after its link disappears during extraction");
+      assert.strictEqual(fixture.events.opens.length, 0, "a disappearing uncaptured project file must not silently become a complete URI note");
+      assert.strictEqual(fixture.events.saves.length, 0);
+      assertProjectHasNoShare(fixture);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  {
+    const fixture = makeHandleCopyFixture(hooks, { rich: true });
+    const originalQuerySelectorAll = fixture.nodes.container.querySelectorAll;
+    const hideAppDuringExtraction = async (...args) => {
+      const extraction = await hooks.extractDownloadFiles(...args);
+      fixture.nodes.container.querySelectorAll = selector => selector === '[data-app-block-preview="true"]' || selector === "iframe"
+        ? [] : originalQuerySelectorAll(selector);
+      return extraction;
+    };
+    try {
+      setProjectRoute(fixture);
+      await fixture.run({ extractDownloadFilesFn: hideAppDuringExtraction });
+      assert.strictEqual(fixture.events.confirms, 1, "a project app present at click time must still require partial consent after its preview disappears during extraction");
+      assert.strictEqual(fixture.events.opens.length, 0, "declining partial consent after project app disappearance must create no URI note");
+      assert.strictEqual(fixture.events.saves.length, 0);
+      assertProjectHasNoShare(fixture);
+
+      fixture.nodes.container.querySelectorAll = originalQuerySelectorAll;
+      fixture.setApprove(true);
+      await fixture.run({ extractDownloadFilesFn: hideAppDuringExtraction });
+      assert.strictEqual(fixture.events.confirms, 2);
+      assert.strictEqual(fixture.events.opens.length, 1, "approved project app-loss partial note must be immediately retryable");
+      const markdown = new URL(fixture.events.opens[0].uri).searchParams.get("content");
+      assert(markdown.includes("capture_status: partial"));
+      assert(markdown.includes("rich_artifacts_expected: 1"));
+      assert(markdown.includes("rich_artifacts_complete: 0"));
+      assert(markdown.includes("Interactive app block not saved"));
+      assertProjectHasNoShare(fixture, markdown);
+    } finally {
+      fixture.restore();
+    }
+  }
+
+  for (const richCase of [
+    { label: "generic partial", previousQa: false },
+    { label: "provider-neutral previous Q/A", previousQa: true },
+    { label: "structured Visualize", previousQa: false, structured: true },
+    { label: "rich-app continuation", previousQa: true, continuation: true }
+  ]) {
+    const fixture = makeHandleCopyFixture(hooks, { rich: true, previousQa: richCase.previousQa });
+    try {
+      setProjectRoute(fixture);
+      if (richCase.previousQa) {
+        Object.assign(fixture.nodes.appBlock, {
+          isConnected: true, style: {},
+          getAttribute: () => "",
+          getBoundingClientRect: () => ({ width: 320, height: 200 }),
+          querySelectorAll: selector => selector === "iframe" ? [fixture.nodes.appFrame] : []
+        });
+        Object.assign(fixture.nodes.appFrame, {
+          parentElement: fixture.nodes.appBlock, isConnected: true, style: {},
+          getBoundingClientRect: () => ({ width: 320, height: 200 }),
+          getAttribute: name => name === "src" ? "https://app-block-test.web-sandbox.oaiusercontent.com/" : ""
+        });
+        if (richCase.continuation) {
+          const previousBlock = { ...fixture.nodes.appBlock };
+          const previousFrame = { ...fixture.nodes.appFrame, parentElement: previousBlock };
+          previousBlock.querySelectorAll = selector => selector === "iframe" ? [previousFrame] : [];
+          fixture.nodes.previousAnswer.node.querySelectorAll = selector => selector === '[data-app-block-preview="true"]'
+            ? [previousBlock] : selector === "iframe" ? [previousFrame] : [];
+          assert.strictEqual(hooks.resolveRichAppContinuationContext(fixture.nodes.container).mode, "rich-app-continuation", "fixture must exercise an otherwise specialized continuation route");
+        } else {
+          assert.strictEqual(hooks.resolvePreviousQaRichAppSaveContext(fixture.nodes.container).mode, "previous-qa-rich-app", "fixture must exercise an otherwise specialized previous-Q/A route");
+        }
+      }
+      if (richCase.structured) {
+        const marker = { getAttribute: name => name === "data-plugin-id" ? "plugin:visualize" : "" };
+        fixture.nodes.questionNode.querySelectorAll = selector => selector === "[data-id], [data-plugin-id]" ? [marker] : [];
+        assert.strictEqual(hooks.isVisualizeShareCandidate(fixture.nodes.container, { requestNode: fixture.nodes.questionNode }), true, "fixture must exercise an otherwise specialized Visualize route");
+      }
+      await fixture.run();
+      assert.strictEqual(fixture.events.confirms, 1, `${richCase.label}: project rich content requires explicit local partial consent`);
+      assert.strictEqual(fixture.events.opens.length, 0, "declined project partial save must create no note");
+      assert.strictEqual(fixture.events.saves.length, 0);
+      assertProjectHasNoShare(fixture);
+      fixture.setApprove(true);
+      await fixture.run();
+      assert.strictEqual(fixture.events.opens.length, 1, "approved project rich partial note must be retryable and keep URI transport");
+      assert.strictEqual(fixture.events.saves.length, 0);
+      const markdown = new URL(fixture.events.opens[0].uri).searchParams.get("content");
+      assert(markdown.includes("capture_status: partial"));
+      assert(markdown.includes("rich_artifacts_expected: 1"));
+      assert(markdown.includes("rich_artifacts_complete: 0"));
+      assert(markdown.includes("Interactive app block not saved"));
+      assertProjectHasNoShare(fixture, markdown);
+    } finally {
+      fixture.restore();
+    }
+  }
 
   {
     const fixture = makeHandleCopyFixture(hooks);
@@ -1903,13 +2310,16 @@ async function main() {
 
   const runDelayedOrdinaryUriFallbackCase = async ({
     label,
+    project = false,
     driftRoute = false,
+    disconnectSelected = false,
     disconnectRuntime = false,
     openerResponseKind = "explicit-failure",
     shareOutcome = null,
     verifyReporting = false
   }) => {
     const fixture = makeHandleCopyFixture(hooks, { rich: false });
+    if (project) setProjectRoute(fixture);
     const sandbox = hooks.__sandbox;
     const fixtureSender = sandbox.chrome.runtime.sendMessage;
     const originalCreateElement = sandbox.document.createElement;
@@ -1963,6 +2373,7 @@ async function main() {
       if (driftRoute) {
         sandbox.location.href = "https://chatgpt.example/c/final-review-uri-fallback-drift";
       }
+      if (disconnectSelected) fixture.nodes.container.isConnected = false;
       if (disconnectRuntime) {
         sandbox.chrome.runtime.lastError = {
           message: "Extension context invalidated while URI opener was pending"
@@ -1983,6 +2394,7 @@ async function main() {
         openerCallback(openerResponse);
       }
       sandbox.chrome.runtime.lastError = null;
+      if (project) assertProjectHasNoShare(fixture);
       if (verifyReporting) {
         assert.strictEqual(typeof openerCallback, "function", `${label}: exercise the real deferred URI callback`);
         assert.strictEqual(result.mode, "ordinary-uri", `${label}: initial result acknowledges URI dispatch only`);
@@ -2016,6 +2428,18 @@ async function main() {
       fixture.restore();
     }
   };
+
+  for (const boundary of [
+    { label: "unchanged project context", expectedClicks: 1 },
+    { label: "project route changed before delayed URI fallback", driftRoute: true, expectedClicks: 0 },
+    { label: "project selected node disconnected before delayed URI fallback", disconnectSelected: true, expectedClicks: 0 }
+  ]) {
+    const result = await runDelayedOrdinaryUriFallbackCase({ ...boundary, project: true });
+    assert.strictEqual(result.resultOk, true, `${boundary.label}: initial URI request must be dispatched`);
+    assert.strictEqual(result.openerCallbackCaptured, true, `${boundary.label}: exercise the real delayed opener callback`);
+    assert.strictEqual(result.runtimeDispatch, 1);
+    assert.strictEqual(result.directUriClicks, boundary.expectedClicks, `${boundary.label}: revalidate project identity before direct fallback`);
+  }
 
   // REG-019: an accepted URI request is not a completed save. A later
   // fail-closed callback must retain the attempt's Share side-effect warning.

@@ -2,7 +2,7 @@
 
 ## Supported Releases
 
-The latest tagged/public release is `1.5.50`. Security fixes are expected to target the latest supported public release unless a later policy states otherwise.
+This security policy targets release `1.5.53`. Security fixes are expected to target the latest supported public release unless a later policy states otherwise.
 
 ## Architecture Summary
 
@@ -13,7 +13,7 @@ GPT to Obsidian Saver is local-first:
 - Obsidian URI mode passes note content to Obsidian through `obsidian://`.
 - Native-helper mode uses Chrome Native Messaging to call a local Python helper.
 
-There is no analytics, telemetry, tracking, developer server, or developer-operated remote storage. One explicit remote side effect exists: after separate consent, the extension can operate ChatGPT's visible Share UI and store a strictly validated ChatGPT share URL as an online-only reference. It does not copy the interactive app locally or call a private sharing API.
+There is no analytics, telemetry, tracking, developer server, or developer-operated remote storage. Recognized project conversations save locally without Share consent, Share actions, clipboard permission/read or generated Share links. Non-project ordinary notes require a separately consented supplemental Share link while retaining their local body and URI/Native route. Supported non-project interactive-app flows can instead create a specialized Native-only remote reference for behavior not copied locally. Both Share flows use ChatGPT's visible UI and a strictly validated URL; neither calls a private sharing API.
 
 ## Trust Boundaries
 
@@ -31,7 +31,9 @@ The downloads permission is constrained to a bounded active-save watch and an ex
 
 ### Share UI and Clipboard
 
-Remote-reference sharing requires separate user consent, side-effect-free Native preflight, one scoped and unambiguous Share action, and one strictly validated final ChatGPT share URL. `clipboardRead` remains optional and can be used for at most one fresh current-action copy signal. Raw clipboard/manual values are not logged or persisted. Share links may remain active after a later save failure; the extension warns and does not automatically revoke them.
+Outside project conversations, ordinary supplemental and specialized remote-reference sharing require explicit consent, selected-target proof, a scoped unambiguous Share action and one strictly validated final URL. Native-required ordinary notes and specialized Native-only references complete Native preflight before Share; URI-only ordinary notes gain no Native requirement. `clipboardRead` remains optional and may read at most one value after a fresh current-action copy-success signal. Raw clipboard/manual values are not logged or persisted. The extension warns when tracked response Create/Update or whole-conversation Share actions may remain active after later save failure; it does not automatically revoke sharing. Existing response-link reuse alone does not claim that a new link was created.
+
+Project routes skip both Share flows and retain their frozen source, exact selected-node/role/ID, route and runtime guards, initial artifact expectations, explicit partial consent and local Native/Vault checks. Missing local app content remains explicitly partial when saved; skipping Share cannot turn it into a complete local app or a remote reference.
 
 ### Vault-Contained Writes
 

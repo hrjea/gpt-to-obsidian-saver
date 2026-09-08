@@ -8,11 +8,13 @@ GPT to Obsidian Saver는 local-first이며 사용자가 직접 실행한 저장 
 
 대화 텍스트는 브라우저 확장 프로그램 안에서 로컬로 처리됩니다. 현재 ChatGPT 페이지 URL은 Markdown frontmatter의 note source로 기록될 수 있습니다.
 
-바로 이전 답변을 명시적으로 가리키는 Visualize 요청에서 필요한 대화 turn이 일시적으로 DOM에서 사라진 경우, 확장 프로그램은 현재 대화를 제한된 범위에서 잠시 스크롤해 인접한 가상화 창의 순서를 검증한 뒤 논리적 위치를 복원할 수 있습니다. 안정된 클릭 창에서 A2 바로 다음의 role-bearing turn이 유일하게 확인되면 그 turn의 메모리 내 identity/content fingerprint와 scroller 기준 픽셀 offset을 초기 복원 위치 계산에 한 번만 사용할 수 있습니다. 이 following-turn anchor는 노트 내용이나 대화 순서 증거가 아니며, 동의 이후 복구에는 재사용되지 않습니다. Q2/A2만 보이는 경우에는 A1/Q2 overlap 다음 Q1/A1 overlap을 모두 요구하며, 복구된 A1은 Markdown 변환용 독립 메모리 clone으로만 유지되고 ChatGPT UI 조작에는 사용되지 않습니다. 동의 중 검증된 missing-only 창이 생기면 callback 안에서는 스크롤하거나 복구하지 않고, 승인된 동의가 돌아온 뒤 정확한 원래 A2와 production conversation scroller를 유지한 채 한 번의 제한된 복구로 필요한 A1/Q2를 다시 결합할 수 있습니다. 응답 Share가 앱 iframe을 최종 surface로 이동시키는 경우에도 A2의 사전 증거와 메모리 내 source fingerprint·구조 개수만 비교합니다. turn 텍스트, identity, 변환 clone, 이동 증거, rich-app runtime 증거는 현재 저장 시도의 메모리에만 남고 로그·저장·전송되지 않으며 시도가 끝나면 폐기됩니다.
+프로젝트 밖의 대화에서 바로 이전 답변을 명시적으로 가리키는 Visualize 요청에서 필요한 대화 turn이 일시적으로 DOM에서 사라진 경우, 확장 프로그램은 현재 대화를 제한된 범위에서 잠시 스크롤해 인접한 가상화 창의 순서를 검증한 뒤 논리적 위치를 복원할 수 있습니다. 안정된 클릭 창에서 A2 바로 다음의 role-bearing turn이 유일하게 확인되면 그 turn의 메모리 내 identity/content fingerprint와 scroller 기준 픽셀 offset을 초기 복원 위치 계산에 한 번만 사용할 수 있습니다. 이 following-turn anchor는 노트 내용이나 대화 순서 증거가 아니며, 동의 이후 복구에는 재사용되지 않습니다. Q2/A2만 보이는 경우에는 A1/Q2 overlap 다음 Q1/A1 overlap을 모두 요구하며, 복구된 A1은 Markdown 변환용 독립 메모리 clone으로만 유지되고 ChatGPT UI 조작에는 사용되지 않습니다. 동의 중 검증된 missing-only 창이 생기면 callback 안에서는 스크롤하거나 복구하지 않고, 승인된 동의가 돌아온 뒤 정확한 원래 A2와 production conversation scroller를 유지한 채 한 번의 제한된 복구로 필요한 A1/Q2를 다시 결합할 수 있습니다. 응답 Share가 앱 iframe을 최종 surface로 이동시키는 경우에도 A2의 사전 증거와 메모리 내 source fingerprint·구조 개수만 비교합니다. turn 텍스트, identity, 변환 clone, 이동 증거, rich-app runtime 증거는 현재 저장 시도의 메모리에만 남고 로그·저장·전송되지 않으며 시도가 끝나면 폐기됩니다.
 
-버전 1.5.52에서는 일반 Markdown, HTML 학습 자료, 생성된 상세 Markdown, 명시적으로 승인한 부분 저장을 포함한 모든 일반 저장이 Obsidian 노트를 만들기 전에 별도의 ChatGPT Share 동의를 요청합니다. 계속하면 ChatGPT에 호스팅되는 응답 공유링크를 생성·갱신·재사용하거나 복사할 수 있고, 응답 Share가 없을 때만 범위를 별도로 고지한 전체 대화 fallback을 사용할 수 있습니다. 취소하면 clipboard permission을 요청하지 않고 Share control을 클릭하지 않으며 노트를 만들지 않습니다. 엄격하게 검증된 URL은 로컬 노트에 보조 링크로 추가될 뿐, 로컬로 캡처된 본문을 rich-app 원격 참조로 바꾸지 않습니다.
+버전 1.5.53에서는 URL로 확인된 ChatGPT 프로젝트 대화를 Share 없이 로컬로 저장합니다. Share 동의·화면 조작·clipboard 권한 요청·읽기를 수행하지 않고 보조 공유링크를 추가하지 않으며, 저장 시작 시점의 URL을 출처로 유지합니다. 로컬 artifact 완전성, 현재 동작의 정확한 다운로드, Native/Vault 검증과 필요한 부분 저장 동의는 유지합니다. 프로젝트 앱의 로컬 콘텐츠가 부족하면 중단하거나 명시적으로 승인한 부분 노트와 영구 경고로만 저장하며 원격 참조 Share 절차로 진입하지 않습니다.
 
-지원되는 상호작용형 앱 답변에는 기존의 별도 동의형 ChatGPT Share 절차가 유지됩니다. 이 모드에서는 엄격하게 검증된 URL이 로컬에 복사되지 않은 상호작용 동작을 위한 원격 참조이므로 앱의 오프라인 복사본을 뜻하지 않습니다. 전체 대화 fallback은 응답 단위 링크보다 범위가 넓으므로 어느 흐름에서든 별도 동의를 요구합니다.
+프로젝트 밖의 대화에서는 일반 Markdown, HTML 학습 자료, 생성된 상세 Markdown, 명시적으로 승인한 부분 저장을 포함한 모든 일반 저장이 Obsidian 노트를 만들기 전에 별도의 ChatGPT Share 동의를 요청합니다. 계속하면 ChatGPT에 호스팅되는 응답 공유링크를 생성·갱신·재사용하거나 복사할 수 있고, 응답 Share가 없을 때만 범위를 별도로 고지한 전체 대화 fallback을 사용할 수 있습니다. 취소하면 clipboard permission을 요청하지 않고 Share control을 클릭하지 않으며 노트를 만들지 않습니다. 엄격하게 검증된 URL은 로컬 노트에 보조 링크로 추가될 뿐, 로컬로 캡처된 본문을 rich-app 원격 참조로 바꾸지 않습니다.
+
+프로젝트 밖의 지원되는 상호작용형 앱 답변에는 기존의 별도 동의형 ChatGPT Share 절차가 유지됩니다. 이 모드에서는 엄격하게 검증된 URL이 로컬에 복사되지 않은 상호작용 동작을 위한 원격 참조이므로 앱의 오프라인 복사본을 뜻하지 않습니다. 전체 대화 fallback은 응답 단위 링크보다 범위가 넓으므로 어느 흐름에서든 별도 동의를 요구합니다.
 
 ## 설정 저장
 
@@ -47,6 +49,6 @@ GPT to Obsidian Saver는 local-first이며 사용자가 직접 실행한 저장 
 - 사용자 데이터 판매 없음
 - 확장 프로그램이 수행하는 노트, vault 파일, 다운로드 첨부파일, 로그의 원격 업로드 없음. 일반 설정은 Chrome sync storage를 사용하므로 사용자의 브라우저/계정 설정에 따라 Chrome이 동기화할 수 있습니다.
 
-위에 설명한 명시적 ChatGPT Share 절차들이 현재 유일한 원격 공유 예외입니다. 이 절차는 개발자 서버나 비공개 ChatGPT API가 아니라 ChatGPT의 화면 UI와 서비스를 사용합니다. 버전 1.5.52은 required/optional permission, telemetry, 원격 note 저장소, runtime/Native payload field를 새로 추가하지 않습니다. 응답 Create/Update 동작 또는 전체 대화 dialog action/instant-copy가 실행된 뒤 Obsidian 저장이 실패하면 링크가 계속 활성 상태일 수 있습니다. 확장 프로그램은 이를 경고하며 자동으로 공유를 해제하지 않습니다. 기존 응답 링크를 단순히 재사용하거나 복사한 것만으로는 이 지속 경고 상태에 들어가지 않습니다.
+위에 설명한 명시적 ChatGPT Share 절차들이 현재 유일한 원격 공유 예외입니다. 이 절차는 개발자 서버나 비공개 ChatGPT API가 아니라 ChatGPT의 화면 UI와 서비스를 사용합니다. 버전 1.5.53은 required/optional permission, telemetry, 원격 note 저장소, runtime/Native payload field를 새로 추가하지 않습니다. 응답 Create/Update 동작 또는 전체 대화 dialog action/instant-copy가 실행된 뒤 Obsidian 저장이 실패하면 링크가 계속 활성 상태일 수 있습니다. 확장 프로그램은 이를 경고하며 자동으로 공유를 해제하지 않습니다. 기존 응답 링크를 단순히 재사용하거나 복사한 것만으로는 이 지속 경고 상태에 들어가지 않습니다.
 
 이 문서는 확장 프로그램의 동작을 설명합니다. Chrome, ChatGPT, Obsidian, 운영체제는 이 확장 프로그램과 별개의 네트워크 및 개인정보 동작을 가질 수 있습니다.

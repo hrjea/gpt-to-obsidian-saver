@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.53] - 2026-09-08
+
+- Save recognized ChatGPT project conversations locally without Share consent, link acquisition, clipboard access or generated Share fields and sections. Keep non-project ordinary supplemental Share mandatory.
+- Preserve the original source URL and captured answer while generated-file viewers change. Retain selected-node, role, identity, route and runtime guards, exact-current file capture, Native/Vault validation and existing URI/fallback rules.
+- Preserve initially expected files and apps across extraction, matching rich expectations to the current or configured previous-Q&A answer being stored. Missing content still requires explicit partial-save consent and truthful warnings.
+- Keep project Visualize and provider-neutral apps on the local capture path; incomplete apps are explicitly partial, with no remote-reference or complete-local-copy claim. Non-project specialized sharing remains unchanged.
+- Add project-route, viewer-change, artifact-loss, partial-consent and fallback regression coverage. The user reports that the original project save works; broader agent-inspected live coverage and fresh isolated package loading are not claimed.
+
 ## [1.5.52] - 2026-09-05
 
 - Add explicitly consented supplemental ChatGPT Share links to ordinary Markdown, HTML learning, detailed Markdown and approved partial notes, preserving local content and URI/Native routing. Declining consent or an invalid/ambiguous target stops without a note.
