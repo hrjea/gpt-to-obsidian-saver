@@ -1,27 +1,27 @@
 # Release Checklist for v1.5.53
 
-Date: 2026-09-08. GitHub-only release preparation. Feature freeze: runtime version 1.5.53; no new runtime change during release preparation.
+Date: 2026-09-08. GitHub-only release. Feature freeze: runtime version 1.5.53; no new runtime change during release preparation.
 
 ## Required release gates
 
 | Gate | Status |
 | --- | --- |
-| Coherent manifest/content/background/options version | AUTOMATED PASS; all version fields1.5.53 |
-| Full standalone release validator and whitespace | AUTOMATED PASS on2026-09-08; five JS suites, Native self-test, exact55-file inventory, privacy, links and whitespace |
-| Independent documentation, complete file inventory, privacy and dependency review | PENDING |
-| Clean committed candidate and unused annotated tags | PENDING; record actual commit and tag targets without overwriting existing tags |
-| Four ZIPs, SHA256SUMS, exact source archive and package contents | NOT RUN; generate and verify from the clean committed release candidate |
+| Coherent manifest/content/background/options version | AUTOMATED PASS; all version fields 1.5.53 |
+| Full standalone release validator and whitespace | AUTOMATED PASS on 2026-09-08; five JS suites, Native self-test, exact 55-file inventory, privacy, links and whitespace |
+| Independent documentation, complete file inventory, privacy and dependency review | PASS; all 55 paths classified: 9 product/tests, 11 public documents, 1 standalone validator, 7 unchanged binary assets and 27 unchanged public text files; no remaining blocker |
+| Clean committed candidate and unused annotated tags | Clean RC `aaf1915e03c4baebf6c174932f4e597354372b08`; annotated `v1.5.53-rc.1` resolves to that commit. The stable tag is checked at publication and is never overwritten. |
+| Four ZIPs, SHA256SUMS, exact source archive and package contents | RC PASS in an independent audit: CRC/checksums, exact 10/9/9/55 file inventories, safe paths/types and every inner file matched to committed source. Extension files match the installed runtime. Final generation and matching from clean committed HEAD are required before upload. |
 | Fresh isolated packaged extension load and options/runtime version | NOT RUN; no fresh isolated browser/package installation was performed |
-| Normal main push and exact remote SHA | PENDING; record the actual remote result |
-| Stable GitHub Release metadata, downloaded assets and checksums | PENDING; re-download every asset and compare archive contents/checksums after publication |
+| Normal main push and exact remote SHA | Publication checks compare Public main and the stable tag without force pushing; see the published repository and tag for the remote result. |
+| Stable GitHub Release metadata, downloaded assets and checksums | Publication requires re-downloading all five assets, matching every byte/checksum and comparing the source archive with the published tree; see GitHub release metadata and `SHA256SUMS.txt`. |
 
-No pending publication or package result is predicted by this checklist.
+This committed checklist records completed candidate checks. External publication results are verified against the published stable tag, release metadata and downloaded assets; they are not predicted here.
 
 ## User verification and release authorization
 
 After the five updated runtime files were placed in the existing unpacked-extension installation, reload and functional testing were delegated to the user. The user reported that the originally failing project save works and explicitly requested the v1.5.53 release.
 
-This is **USER-REPORTED PASS for the original project-save scenario only**. It does not establish an independently observed loaded runtime, every Share/clipboard interaction, a Native payload/audit, or a direct inspection of the resulting Vault note and all artifacts. The user authorized release with the unperformed checks below remaining explicit limitations. Required automatic, review, packaging and delivery checks still need their actual results before completion.
+This is **USER-REPORTED PASS for the original project-save scenario only**. It does not establish an independently observed loaded runtime, every Share/clipboard interaction, a Native payload/audit, or a direct inspection of the resulting Vault note and all artifacts. The user authorized release with the unperformed checks below remaining explicit limitations. Candidate automatic, review and package checks passed as recorded above; final packaging and delivery checks must pass before release completion.
 
 | Scenario | Status |
 | --- | --- |
