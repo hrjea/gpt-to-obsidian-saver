@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.5.54] - 2026-09-08
+
+- Wait for HTML artifact Preview restoration after temporary Code extraction before checking the selected answer. This fixes false `selected assistant changed` preflight failures.
+- Keep ordinary Share consent and strict target validation, project no-Share behavior, frozen note content, and verified HTML attachments. Fail closed on restoration timeout, missing/ambiguous viewers or genuine answer changes; preserve initially active Code views.
+- Add delayed-restoration and negative regression coverage. The user reports that the original HTML save succeeds; broader agent-inspected live coverage and fresh isolated package load remain unverified.
+
 ## [1.5.53] - 2026-09-08
 
 - Save recognized ChatGPT project conversations locally without Share consent, link acquisition, clipboard access or generated Share fields and sections. Keep non-project ordinary supplemental Share mandatory.

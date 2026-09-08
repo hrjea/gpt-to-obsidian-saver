@@ -1,7 +1,7 @@
 
-// content.js (1.5.53) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.54) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.53";
+  const VERSION = "1.5.54";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
@@ -9227,9 +9227,11 @@
 
       let currentDescriptor = descriptor;
       let source = extractCompleteHtmlSource(currentDescriptor.root);
+      let openedCodeView = false;
 
       if (!source) {
         try {
+          openedCodeView = true;
           descriptor.codeToggle.click();
           for (let attempt = 0; attempt < 30 && !source; attempt++) {
             await sleep(100);
@@ -9252,12 +9254,34 @@
         warnings.push(`HTML artifact source was not readable for ${name}.`);
       }
 
-      if (descriptor.restorePreview) {
+      if (openedCodeView && descriptor.restorePreview) {
+        let restored = false;
         try {
           const refreshed = collectInteractiveArtifactDescriptors(container, expectedNames, candidates);
-          const currentPreviewToggle = refreshed.find(item => item.name === name)?.previewToggle || currentDescriptor.previewToggle || descriptor.previewToggle;
-          currentPreviewToggle?.click?.();
+          const matches = refreshed.filter(item => item.name === name);
+          if (matches.length === 1 && matches[0].previewToggle) {
+            matches[0].previewToggle.click();
+            // ChatGPT applies Preview asynchronously. Keep temporary Code text
+            // out of the strict selected-answer proof that follows extraction.
+            for (let attempt = 0; attempt < 30; attempt++) {
+              await sleep(100);
+              const current = collectInteractiveArtifactDescriptors(container, expectedNames, candidates)
+                .filter(item => item.name === name);
+              if (current.length !== 1) continue;
+              const viewer = current[0];
+              if (viewer.root?.isConnected === false || !viewer.previewToggle) continue;
+              if (viewer.codeToggle?.getAttribute?.("aria-pressed") === "true" ||
+                  viewer.previewToggle.getAttribute?.("aria-pressed") === "false") continue;
+              if (extractCompleteHtmlSource(viewer.root)) continue;
+              restored = true;
+              break;
+            }
+          }
         } catch {}
+        if (!restored) {
+          files.previewRestorationFailed = true;
+          warnings.push(`HTML artifact Preview restoration did not complete for ${name}.`);
+        }
       }
     }
 
@@ -9907,7 +9931,8 @@
       candidatesCount: candidates.length,
       clickedFallback,
       failures,
-      warnings
+      warnings,
+      previewRestorationFailed: !!interactiveFiles.previewRestorationFailed
     };
   }
 
@@ -11094,6 +11119,11 @@
         runtimeGuard.fail(extraction.runtimeFailure || runtimeGuard.getFailure(), "html-artifact");
         runtimeGuard.notify();
         return;
+      }
+      if (!projectConversation && extraction.previewRestorationFailed) {
+        const failure = { ok: false, stage: "preflight", reason: "HTML artifact preview could not be restored" };
+        try { alertFn(saveFailureMessage(failure)); } catch {}
+        return failure;
       }
       // Project notes keep their captured local body. Opening file viewers can
       // change rendered Markdown without changing the selected local source;

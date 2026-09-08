@@ -1,5 +1,7 @@
 # GPT to Obsidian Saver
 
+Version 1.5.54 fixes HTML saving that could stop with `selected assistant changed` while the artifact viewer returned from Code to Preview. The user reports the original save succeeds. Ordinary supplemental Share and project no-Share behavior are preserved.
+
 [English](README.md) | [한국어](README.ko.md)
 
 GPT to Obsidian Saver is a Chrome extension that saves ChatGPT answers to Obsidian as local Markdown notes. It can also save real downloadable HTML learning materials as note-relative attachments.
@@ -49,13 +51,13 @@ Version 1.5.53 adds project-conversation saving without Share. Non-project suppl
 
 The project is currently distributed through GitHub Releases only. It is installed as an unpacked Chrome extension.
 
-The installation instructions below target v1.5.53. Verify the published release version and checksums before installation.
+The installation instructions below target v1.5.54. Verify the published release version and checksums before installation.
 
 This project is not available through the Chrome Web Store. Do not expect Chrome Web Store installation, listing, review, or automatic update behavior.
 
 ## Install from GitHub Releases
 
-1. Download `gpt-to-obsidian-saver-v1.5.53-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.54-unpacked-extension.zip` from the GitHub Release.
 2. Verify the SHA-256 checksum from `SHA256SUMS.txt`.
 3. Unzip the file.
 4. Open `chrome://extensions`.
@@ -101,7 +103,7 @@ The native host allowed origin must match the actual extension ID shown by Chrom
 ### macOS Native Helper
 
 1. Copy the extension ID from `chrome://extensions`.
-2. Download and unzip `gpt-to-obsidian-saver-v1.5.53-native-host-macos.zip`.
+2. Download and unzip `gpt-to-obsidian-saver-v1.5.54-native-host-macos.zip`.
 3. Run:
 
 ```sh

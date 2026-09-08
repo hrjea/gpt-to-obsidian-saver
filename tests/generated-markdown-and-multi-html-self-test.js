@@ -45,7 +45,7 @@ function loadHooks({ syncState = {} } = {}) {
         lastError: null,
         sendMessage: (message, callback) => callback?.(
           message?.type === "gpt2obs-runtime-ping"
-            ? { ok: true, pong: true, version: "1.5.53" }
+            ? { ok: true, pong: true, version: "1.5.54" }
             : { ok: true }
         )
       }
@@ -145,9 +145,16 @@ function htmlDocument(name, heading, body, links = "") {
   return `<!doctype html>\n<html><head><title>${name}</title></head><body><h1>${heading}</h1>${links}<p>${body}</p></body></html>`;
 }
 
-function makeArtifactViewer(name, source) {
-  let sourceVisible = false;
+function makeArtifactViewer(name, source, {
+  initialCodeVisible = false,
+  previewRestoreDelayMs = 0,
+  neverRestorePreview = false,
+  onPreviewRequested = () => {},
+  onSourceVisibilityChange = () => {}
+} = {}) {
+  let sourceVisible = initialCodeVisible;
   let previewRestored = false;
+  let restoreTimer = null;
   const sourceNode = {
     value: "",
     innerText: source,
@@ -155,6 +162,7 @@ function makeArtifactViewer(name, source) {
     getAttribute: () => ""
   };
   const root = {
+    isConnected: true,
     parentElement: null,
     className: "artifact-viewer",
     innerText: name,
@@ -175,21 +183,38 @@ function makeArtifactViewer(name, source) {
     parentElement: group,
     innerText: "코딩",
     textContent: "코딩",
-    getAttribute: attr => attr === "aria-label" ? "코딩" : (attr === "aria-pressed" ? "false" : ""),
+    getAttribute: attr => attr === "aria-label" ? "코딩" : (attr === "aria-pressed" ? String(sourceVisible) : ""),
     closest: selector => selector === "[role=\"group\"]" ? group : null,
     querySelector: () => null,
-    click: () => { sourceVisible = true; }
+    click: () => {
+      sourceVisible = true;
+      onSourceVisibilityChange(true);
+    }
   };
   const previewToggle = {
     parentElement: group,
     innerText: "미리 보기",
     textContent: "미리 보기",
-    getAttribute: attr => attr === "aria-label" ? "미리 보기" : "",
+    getAttribute: attr => attr === "aria-label" ? "미리 보기" : (attr === "aria-pressed" ? String(!sourceVisible) : ""),
     closest: selector => selector === "[role=\"group\"]" ? group : null,
     querySelector: () => null,
-    click: () => { previewRestored = true; }
+    click: () => {
+      onPreviewRequested();
+      if (neverRestorePreview) return;
+      const restore = () => {
+        sourceVisible = false;
+        previewRestored = true;
+        onSourceVisibilityChange(false);
+      };
+      if (previewRestoreDelayMs > 0) restoreTimer = setTimeout(restore, previewRestoreDelayMs);
+      else restore();
+    }
   };
-  return { name, root, codeToggle, previewToggle, source, wasPreviewRestored: () => previewRestored };
+  return {
+    name, root, codeToggle, previewToggle, source,
+    wasPreviewRestored: () => previewRestored,
+    cleanup: () => { clearTimeout(restoreTimer); }
+  };
 }
 
 function makeVisibilityNode({ connected = true, width = 160, height = 32, display = "", visibility = "" } = {}) {
@@ -735,6 +760,7 @@ function makeHandleCopyFixture(hooks, {
       root,
       appBlock,
       appFrame,
+      realFrame,
       questionNode,
       container,
       questionTurn,
@@ -778,7 +804,7 @@ function makeHandleCopyFixture(hooks, {
 
 async function main() {
   const hooks = loadHooks();
-  assert.strictEqual(hooks.VERSION, "1.5.53");
+  assert.strictEqual(hooks.VERSION, "1.5.54");
   const assertOrdinaryResponseSupplementalSchema = (markdown, shareUrl, label) => {
     assert.strictEqual((markdown.match(/^# (?:ChatGPT Share|ChatGPT 공유)$/gm) || []).length, 1, `${label} must contain exactly one supplemental block`);
     assert.strictEqual((markdown.match(/^chatgpt_share_url:/gm) || []).length, 1, `${label} must contain exactly one response URL field`);
@@ -1069,6 +1095,91 @@ async function main() {
   assert.strictEqual(hooks.isDuplicateContentSave(reservationKey), false, "cancelling must allow an immediate retry");
   hooks.clearContentSaveReservation(reservationKey);
   hooks.setTestLanguage("en");
+
+  const makeHtmlPreviewSaveFixture = ({ neverRestorePreview = false, restoredAnswer = null } = {}) => {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false, html: true, outer: "Frozen authored answer with actual.html" });
+    hooks.__sandbox.location.href = `https://chatgpt.com/c/synthetic-html-preview-${handleFixtureSequence}`;
+    const frozenAnswer = fixture.nodes.container.innerText;
+    const viewer = makeArtifactViewer("actual.html", htmlDocument("Actual", "Real file", "complete body"), {
+      previewRestoreDelayMs: 150,
+      neverRestorePreview,
+      onSourceVisibilityChange: visible => {
+        fixture.nodes.container.innerText = visible ? `${frozenAnswer}\n${viewer.source}` : (restoredAnswer ?? frozenAnswer);
+        fixture.nodes.container.textContent = fixture.nodes.container.innerText;
+        fixture.events.order.push(visible ? "artifact-code-visible" : "artifact-preview-restored");
+      }
+    });
+    const originalQuerySelectorAll = fixture.nodes.container.querySelectorAll;
+    fixture.nodes.container.querySelectorAll = selector => selector === "button"
+      ? [viewer.codeToggle, viewer.previewToggle] : originalQuerySelectorAll(selector);
+    viewer.root.parentElement = fixture.nodes.container;
+    fixture.nodes.realFrame.parentElement = viewer.root;
+    return { fixture, viewer, frozenAnswer };
+  };
+
+  {
+    const { fixture, viewer, frozenAnswer } = makeHtmlPreviewSaveFixture();
+    try {
+      const result = await fixture.run({ saveObsidianNoteFn: undefined });
+      assert.strictEqual(fixture.events.saves.length, 1, `ordinary HTML must wait for its asynchronous Preview restoration before Share proof and Native save: ${result?.reason || result?.stage || "unknown failure"}`);
+      assert(viewer.wasPreviewRestored(), "ordinary HTML extraction must restore Preview before it returns");
+      assert(fixture.events.order.indexOf("artifact-preview-restored") < fixture.events.order.indexOf("share-consent"), "Share consent must follow completed Preview restoration");
+      assert.deepStrictEqual(Array.from(fixture.events.shares), ["response"]);
+      assert.strictEqual(fixture.events.opens.length, 0);
+      const payload = fixture.events.saves[0].payload;
+      assert(payload.content.includes(frozenAnswer));
+      assert(!payload.content.includes("<!doctype html>"), "temporary code-view text must not replace the frozen note answer");
+      assert.strictEqual(payload.attachments.length, 1);
+      assert.strictEqual(payload.attachments[0].content, viewer.source);
+      assert.deepStrictEqual(Array.from(payload.attachmentNames), ["actual.html"]);
+      assertOrdinaryResponseSupplementalSchema(payload.content, fixture.responseShareUrl, "ordinary HTML after asynchronous Preview restoration");
+    } finally {
+      viewer.cleanup();
+      fixture.restore();
+    }
+  }
+
+  {
+    const { fixture, viewer } = makeHtmlPreviewSaveFixture({ neverRestorePreview: true });
+    let deadline;
+    try {
+      const result = await Promise.race([
+        fixture.run({ saveObsidianNoteFn: undefined }),
+        new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error("HTML Preview restoration must terminate within a bounded wait")), 6000); })
+      ]);
+      assert.strictEqual(viewer.wasPreviewRestored(), false);
+      assert.strictEqual(result?.ok, false, "an HTML viewer that never returns to Preview must fail closed");
+      assert.strictEqual(result?.stage, "preflight");
+      assert.match(result?.reason || "", /HTML artifact preview could not be restored/i, "a Preview timeout must report its cause instead of misreporting an authored-answer change");
+      assert.strictEqual(fixture.events.shareConsents, 0);
+      assert.strictEqual(fixture.events.permissions, 0);
+      assert.strictEqual(fixture.events.shares.length, 0, "an un-restored Preview must stop before Share");
+      assert.strictEqual(fixture.events.opens.length, 0, "an un-restored Preview must stop before URI dispatch");
+      assert.strictEqual(fixture.events.saves.length, 0, "an un-restored Preview must stop before Native dispatch");
+    } finally {
+      clearTimeout(deadline);
+      viewer.cleanup();
+      fixture.restore();
+    }
+  }
+
+  {
+    const { fixture, viewer } = makeHtmlPreviewSaveFixture({ restoredAnswer: "Author edited the answer while the HTML viewer was open: actual.html" });
+    try {
+      const result = await fixture.run({ saveObsidianNoteFn: undefined });
+      assert(viewer.wasPreviewRestored(), "authored-content drift must be evaluated after the temporary Code presentation is gone");
+      assert.strictEqual(result?.ok, false);
+      assert.strictEqual(result?.reason, "selected assistant changed", "restoring Preview must not exempt a genuine authored-answer change from the strict Share proof");
+      assert.strictEqual(fixture.events.shareConsents, 0);
+      assert.strictEqual(fixture.events.permissions, 0);
+      assert.strictEqual(fixture.events.shares.length, 0);
+      assert.strictEqual(fixture.events.opens.length, 0);
+      assert.strictEqual(fixture.events.saves.length, 0);
+    } finally {
+      viewer.cleanup();
+      fixture.restore();
+    }
+  }
 
   const projectPath = "/g/g-p-0123456789abcdef0123456789abcdef-synthetic-project/c/11111111-2222-4333-8444-555555555555";
   const setProjectRoute = () => {
@@ -3728,6 +3839,61 @@ async function main() {
   });
   assert.notStrictEqual(mappedByName["index.html"], mappedByName["00-overview.html"]);
   assert.notStrictEqual(mappedByName["00-overview.html"], mappedByName["09-references.html"]);
+
+  for (const mutation of ["duplicate", "missing"]) {
+    let activeViewers;
+    const secondViewer = makeArtifactViewer("restore-check.html", htmlDocument("Other", "Other", "other body"));
+    const viewer = makeArtifactViewer("restore-check.html", htmlDocument("Restore", "Restore", "original body"), {
+      onPreviewRequested: () => { activeViewers = mutation === "duplicate" ? [viewer, secondViewer] : []; }
+    });
+    activeViewers = [viewer];
+    const container = {
+      innerText: "restore-check.html",
+      textContent: "restore-check.html",
+      querySelector: selector => selector.includes("iframe") ? {} : null,
+      querySelectorAll: selector => selector === "button"
+        ? activeViewers.flatMap(item => [item.codeToggle, item.previewToggle]) : []
+    };
+    let deadline;
+    try {
+      const files = await Promise.race([
+        hooks.readInteractiveHtmlArtifacts(container, ["restore-check.html"], []),
+        new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error(`${mutation} viewer restoration must terminate within a bounded wait`)), 6000); })
+      ]);
+      assert.strictEqual(files.length, 1, `${mutation} fixture must capture the original HTML before the viewer changes`);
+      assert.strictEqual(files[0].content, viewer.source);
+      assert(viewer.wasPreviewRestored(), `${mutation} fixture must remove temporary source so ambiguity or absence causes the failure`);
+      assert.strictEqual(files.previewRestorationFailed, true, `${mutation} HTML viewer after Preview click must not certify restoration`);
+    } finally {
+      clearTimeout(deadline);
+      viewer.cleanup();
+      secondViewer.cleanup();
+    }
+  }
+
+  {
+    let previewRequests = 0;
+    const viewer = makeArtifactViewer("already-code.html", htmlDocument("Code", "Code", "already visible source"), {
+      initialCodeVisible: true,
+      onPreviewRequested: () => { previewRequests += 1; }
+    });
+    const container = {
+      innerText: "already-code.html",
+      textContent: "already-code.html",
+      querySelector: selector => selector.includes("iframe") ? {} : null,
+      querySelectorAll: selector => selector === "button" ? [viewer.codeToggle, viewer.previewToggle] : []
+    };
+    try {
+      const files = await hooks.readInteractiveHtmlArtifacts(container, ["already-code.html"], []);
+      assert.strictEqual(files.length, 1);
+      assert.strictEqual(files[0].content, viewer.source);
+      assert.strictEqual(previewRequests, 0, "an already active Code view must not be switched to Preview by extraction");
+      assert.strictEqual(viewer.codeToggle.getAttribute("aria-pressed"), "true");
+      assert(!files.previewRestorationFailed, "an unchanged initial Code view must not be treated as a restoration failure");
+    } finally {
+      viewer.cleanup();
+    }
+  }
 
   const uniqueValidation = hooks.validateCapturedHtmlFiles(mapped);
   assert.strictEqual(uniqueValidation.files.length, 3);

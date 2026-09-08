@@ -1,6 +1,6 @@
 # Architecture
 
-Status: public architecture overview for version v1.5.53. Validation and release delivery are recorded separately in [the release checklist](../RELEASE_CHECKLIST_v1.5.53.md).
+Status: public architecture overview for version v1.5.54. Validation and release delivery are recorded separately in [the release checklist](../RELEASE_CHECKLIST_v1.5.54.md).
 
 ## System context
 
@@ -98,7 +98,7 @@ This supplemental Share flow applies to non-project conversations.
 ### 2. HTML and generated-file Native flow
 
 1. Content script inventories visible file and rich-artifact expectations; project saves retain initial expectations and match rich content to the actual selected current/previous-Q&A body.
-2. It reads page-accessible HTML or a unique detailed Markdown viewer when possible.
+2. It reads page-accessible HTML or a unique detailed Markdown viewer when possible. After this attempt opens HTML Code, it waits for bounded, uniquely scoped Preview restoration before ordinary Share proof. Unconfirmed restoration stops ordinary saving; genuine answer changes still fail the original proof. Already-open Code views and project local guards are preserved.
 3. If required, it starts a bounded exact-current download watch before asking for the one real user click.
 4. It compares expected and captured deliverables.
 5. Missing content cancels by default; supported partial capture requires explicit consent.

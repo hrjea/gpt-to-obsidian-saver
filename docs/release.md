@@ -2,7 +2,7 @@
 
 This document describes the GitHub-only release process. Do not add Chrome Web Store submission steps.
 
-Commands below show the historical v1.5.50 release. For v1.5.53 use [the version-specific checklist](../RELEASE_CHECKLIST_v1.5.53.md) and never reuse an existing tag.
+Commands below show the historical v1.5.50 release. For v1.5.54 use [the version-specific checklist](../RELEASE_CHECKLIST_v1.5.54.md) and never reuse an existing tag.
 
 ## 1. Feature Freeze
 
@@ -60,7 +60,7 @@ The candidate tree must be committed and clean before archive generation. `scrip
 
 ## 6. Manual Smoke Testing
 
-The v1.5.53 checklist separately records the original-project-save user report, unperformed agent Native/Vault inspection and fresh isolated package load. The user authorized release with these limits after reporting the original save works; do not promote that report to full live coverage.
+The v1.5.54 checklist separately records the original-HTML-save user report, unperformed agent Native/Vault inspection and fresh isolated package load. The user authorized release with these limits after reporting the original save works; do not promote that report to full live coverage.
 
 Preserve the historical v1.5.40 evidence in [manual-smoke-test.md](manual-smoke-test.md) and `RELEASE_CHECKLIST.md`. For v1.5.50, use [manual-smoke-test-v1.5.50.md](manual-smoke-test-v1.5.50.md) and record results in `RELEASE_CHECKLIST_v1.5.50.md`.
 

@@ -1,5 +1,7 @@
 # GPT to Obsidian Saver
 
+버전 1.5.54는 HTML 코드 추출 후 미리보기 복원 중 `selected assistant changed` 오류로 저장이 중단되는 문제를 수정합니다. 원래 실패했던 저장은 사용자 검증에서 성공했습니다. 일반 채팅 Share 적용과 프로젝트 채팅 Share 제외는 유지됩니다.
+
 [English](README.md) | [한국어](README.ko.md)
 
 GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 저장하는 Chrome 확장 프로그램입니다. 실제 다운로드 가능한 HTML 학습자료도 노트 기준 상대 링크를 가진 첨부파일로 저장할 수 있습니다.
@@ -49,13 +51,13 @@ Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 
 
 현재 이 프로젝트는 GitHub Releases를 통해서만 배포되며, Chrome의 Load unpacked 기능으로 설치합니다.
 
-아래 설치 안내는 v1.5.53을 대상으로 합니다. 설치 전에 게시된 릴리스 버전과 checksum을 확인하세요.
+아래 설치 안내는 v1.5.54를 대상으로 합니다. 설치 전에 게시된 릴리스 버전과 checksum을 확인하세요.
 
 Chrome Web Store에서는 제공되지 않습니다. Chrome Web Store 설치, listing, review, 자동 업데이트 동작을 기대하면 안 됩니다.
 
 ## GitHub Releases에서 설치
 
-1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.53-unpacked-extension.zip`을 다운로드합니다.
+1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.54-unpacked-extension.zip`을 다운로드합니다.
 2. `SHA256SUMS.txt`로 SHA-256 checksum을 확인합니다.
 3. ZIP 파일을 압축 해제합니다.
 4. `chrome://extensions`를 엽니다.
@@ -101,7 +103,7 @@ Native host의 allowed origin은 Chrome에 표시되는 실제 extension ID와 �
 ### macOS Native Helper
 
 1. `chrome://extensions`에서 extension ID를 복사합니다.
-2. `gpt-to-obsidian-saver-v1.5.53-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
+2. `gpt-to-obsidian-saver-v1.5.54-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
 3. 다음을 실행합니다.
 
 ```sh
