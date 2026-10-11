@@ -62,6 +62,16 @@ Confirm:
 
 Plain filename text such as `options 2.html` and `example 1.html` should not create attachments.
 
+## Index Saved but Linked HTML Files Are Missing
+
+Update to v1.5.62, reload the extension and refresh the ChatGPT page. Save inventories inline file references and current resource cards, including the selected answer's collapsed file list, and captures remaining HTML even when the index was readable first. Keep the answer available while its bounded file collection runs. If a prompt requests a download, click only the highlighted matching control.
+
+Inspect all expected files and the index's chapter links in the resulting Vault. The batch has a shared 90-second deadline and 100-file bound. Missing or ambiguous cards and unrelated downloads remain incomplete; cancelling partial-save consent creates no note. Installing this version does not repair older notes automatically.
+
+## Branch & visualize Stops
+
+Check the new branch and its draft. Existing text, a changed answer/route, ambiguous Visualize controls or an expired attempt stop automation. A branch or draft may remain. A request is never automatically resent after submission becomes uncertain. The action is separate from Save and may count toward ChatGPT usage.
+
 ## Detailed Markdown Artifact Was Not Added to the Note
 
 Generated detailed `.md` files are read from the matching ChatGPT file card or from the exact download started by the current Save action. If ChatGPT blocks a synthetic click, follow the prompt and click the highlighted Markdown filename card or its exact `File download` / `파일 다운로드` control once. The bounded viewer and download window is 90 seconds.

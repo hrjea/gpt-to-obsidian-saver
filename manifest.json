@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "1.5.54",
+  "version": "1.5.62",
   "default_locale": "en",
   "description": "__MSG_extensionDescription__",
   "permissions": [
@@ -32,6 +32,7 @@
         "https://chatgpt.com/*"
       ],
       "js": [
+        "branch-visualize.js",
         "content.js"
       ],
       "run_at": "document_idle"

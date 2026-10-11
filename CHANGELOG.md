@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.62-rc.1] - 2026-10-11
+
+Prerelease candidate; extension version and asset filenames use 1.5.62. Stable publication remains blocked on the current live/manual gates.
+
+- Capture linked HTML files from current inline file references, resource cards and collapsed file lists, including remaining files when an index was already readable. Preserve canonical filenames across Chrome duplicate suffixes for sibling-link rewriting.
+- Keep each download bounded to the exact current filename/control, with a shared 90-second batch budget and 100-file bound. Unrelated or ambiguous downloads and runtime failures remain incomplete; existing partial-save consent, Share rules and Native/Vault boundaries remain intact.
+- Restore Save and adjacent actions on the current search-unit message layout while rejecting role, identity and toolbar ambiguity.
+- Include Branch & visualize, added since v1.5.54: an explicit click opens a native ChatGPT branch at the selected answer and sends one fixed native Visualize request. It checks the source, destination, empty draft and selected plugin; no additional permissions, clipboard access or automatic Obsidian save is added. Requests may count toward ChatGPT usage.
+- Include branch startup/handoff, temporary-draft transition and Visualize-menu compatibility fixes. Changed targets, user drafts, interruptions and uncertain sends remain fail-closed without automatic resend.
+- Installed v1.5.62 Chrome Save/Native/Vault E2E and fresh isolated package load are NOT RUN. Source validation, packaging and publication are tracked separately in [the release checklist](RELEASE_CHECKLIST_v1.5.62.md).
+
 ## [1.5.54] - 2026-09-08
 
 - Wait for HTML artifact Preview restoration after temporary Code extraction before checking the selected answer. This fixes false `selected assistant changed` preflight failures.

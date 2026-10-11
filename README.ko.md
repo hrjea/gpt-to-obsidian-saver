@@ -1,6 +1,6 @@
 # GPT to Obsidian Saver
 
-버전 1.5.54는 HTML 코드 추출 후 미리보기 복원 중 `selected assistant changed` 오류로 저장이 중단되는 문제를 수정합니다. 원래 실패했던 저장은 사용자 검증에서 성공했습니다. 일반 채팅 Share 적용과 프로젝트 채팅 Share 제외는 유지됩니다.
+사전릴리스 후보 **v1.5.62-rc.1**(확장 프로그램 버전 1.5.62)은 현재 ChatGPT 파일 카드의 연결된 HTML 첨부 수집과 메시지 화면의 저장 버튼 호환성을 개선합니다. 명시적으로 클릭하면 새 ChatGPT 분기에서 Visualize 요청을 전송하는 ‘분기해서 시각화’ 기능도 포함합니다. 이번 후보의 실제 Chrome 저장·Native/Vault E2E 검증은 아직 NOT RUN입니다. [릴리스 체크리스트](RELEASE_CHECKLIST_v1.5.62.md)를 참고하세요.
 
 [English](README.md) | [한국어](README.ko.md)
 
@@ -10,7 +10,7 @@ GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 �
 
 ![GPT to Obsidian Saver 데모](assets/demo.gif)
 
-이 15초 공개용 데모는 임시 ChatGPT 대화와 Obsidian 테스트 vault만 사용했습니다. 실제 HTML artifact, Save to Obsidian 실행, 생성된 Markdown 노트, 저장된 HTML 학습자료를 순서대로 보여줍니다.
+이 이전 버전의 15초 공개용 데모는 임시 ChatGPT 대화와 Obsidian 테스트 vault만 사용했습니다. 실제 HTML artifact, Save to Obsidian 실행, 생성된 Markdown 노트, 저장된 HTML 학습자료를 순서대로 보여줍니다.
 
 공개용으로 정리한 스크린샷은 [assets/screenshots](assets/screenshots)에서도 확인할 수 있습니다. 옵션 페이지 화면은 로컬 extension ID와 vault path가 노출되지 않도록 별도로 캡처해야 하므로 아직 포함하지 않았습니다.
 
@@ -39,11 +39,17 @@ GPT to Obsidian Saver는 ChatGPT 답변을 Obsidian 로컬 Markdown 노트로 �
 
 Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 저장합니다. A1/A2를 합치지 않으며 HTML 이전 Q/A 옵션은 별도로 유지합니다.
 
+## 분기해서 시각화
+
+저장 버튼 옆의 **분기해서 시각화**를 클릭하면 선택한 답변에서 새 ChatGPT 분기를 열고 native Visualize 플러그인으로 고정된 요청을 전송합니다. ChatGPT 계정 사용량에 반영될 수 있습니다. 원래 답변·분기·빈 입력창을 확인하며, 사용자 입력·대상 변경·없거나 모호한 control이 있으면 중단합니다. 최대 한 번만 전송하고 Obsidian에 자동 저장하지 않습니다. 중단된 분기나 초안은 확인을 위해 남을 수 있습니다.
+
+추가 권한·클립보드 사용·공개 Share 링크 생성은 없습니다. 임시 연결 정보는 확장 프로그램의 session 저장소에 보관되며 2분 뒤 만료됩니다. [개인정보 안내](docs/privacy.ko.md)를 참고하세요.
+
 ## 지원 플랫폼
 
 | 플랫폼 | 상태 |
 | --- | --- |
-| Chrome on macOS | URI mode와 native-helper mode를 지원하며 이전 버전의 실제 검증 기록이 있습니다. 1.5.53은 원래 프로젝트 저장의 사용자 성공 보고가 있으며, 에이전트의 새 Native/Vault 검사와 격리 패키지 로드는 실행하지 않았습니다. |
+| Chrome on macOS | URI/native-helper mode를 지원하며 이전 버전의 실제 검증 기록이 있습니다. 1.5.62 실제 저장·Native/Vault 및 격리 패키지 로드는 NOT RUN이며 소스 검증은 현재 릴리스 체크리스트에 별도로 기록합니다. |
 | Chrome on Windows | Obsidian URI 처리가 동작하면 URI mode는 사용할 수 있습니다. Native-helper support는 Experimental이며 이번 릴리스에서 실제 Windows 환경 검증은 하지 않았습니다. |
 | Linux | 로컬 URI 처리 상태에 따라 URI mode는 동작할 수 있습니다. Native-helper mode는 지원하지 않습니다. |
 
@@ -51,13 +57,13 @@ Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 
 
 현재 이 프로젝트는 GitHub Releases를 통해서만 배포되며, Chrome의 Load unpacked 기능으로 설치합니다.
 
-아래 설치 안내는 v1.5.54를 대상으로 합니다. 설치 전에 게시된 릴리스 버전과 checksum을 확인하세요.
+아래 안내는 **v1.5.62-rc.1 사전릴리스**를 대상으로 하며, 확장 프로그램 및 ZIP 파일명은 1.5.62를 사용합니다. 최신 정식 릴리스는 v1.5.54로 유지합니다. 사전릴리스를 직접 선택하고 설치 전에 checksum을 확인하세요.
 
 Chrome Web Store에서는 제공되지 않습니다. Chrome Web Store 설치, listing, review, 자동 업데이트 동작을 기대하면 안 됩니다.
 
 ## GitHub Releases에서 설치
 
-1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.54-unpacked-extension.zip`을 다운로드합니다.
+1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.62-unpacked-extension.zip`을 다운로드합니다.
 2. `SHA256SUMS.txt`로 SHA-256 checksum을 확인합니다.
 3. ZIP 파일을 압축 해제합니다.
 4. `chrome://extensions`를 엽니다.
@@ -103,7 +109,7 @@ Native host의 allowed origin은 Chrome에 표시되는 실제 extension ID와 �
 ### macOS Native Helper
 
 1. `chrome://extensions`에서 extension ID를 복사합니다.
-2. `gpt-to-obsidian-saver-v1.5.54-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
+2. `gpt-to-obsidian-saver-v1.5.62-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
 3. 다음을 실행합니다.
 
 ```sh
@@ -154,6 +160,8 @@ PowerShell:
 이 방식이 실패하고 사용자가 실제 HTML download candidate에서 Save to Obsidian을 클릭한 경우, `downloads` permission은 그 저장 작업 직후 다운로드된 HTML 파일을 식별하는 데만 사용됩니다. Native helper는 그 특정 `.html` 또는 `.htm` 파일만 설정된 vault 첨부 폴더로 복사합니다.
 
 `options 2.html` 또는 `example 1.html` 같은 일반 텍스트는 첨부파일을 만들지 않습니다.
+
+현재 inline 파일 참조와 resource 카드, 접힌 파일 목록에서 예상 HTML 파일을 확인합니다. index를 먼저 읽었더라도 나머지 파일을 각각 정확한 이름의 제한된 다운로드로 수집합니다. 전체 HTML 다운로드 예산은 90초, 최대 100개이며, 이름 불일치·모호한 버튼·확장 연결 오류는 완료로 처리하지 않습니다. Chrome이 중복 파일명 접미사를 붙여도 원래 파일명을 유지해 형제 HTML 링크를 연결합니다.
 
 ## HTML 학습자료 노트
 

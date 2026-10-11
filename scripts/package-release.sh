@@ -44,7 +44,7 @@ copy_items() {
 }
 
 copy_items "gpt-to-obsidian-saver-v${VERSION}-unpacked-extension.zip" \
-  manifest.json background.js content.js options.html options.js \
+  manifest.json background.js content.js branch-visualize.js branch-launch.html branch-launch.js options.html options.js \
   _locales/en/messages.json \
   _locales/ko/messages.json \
   icons/icon16.png \

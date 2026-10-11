@@ -70,7 +70,7 @@ print("permissions ok")
 PY
 if [ $? -eq 0 ]; then pass "manifest permissions"; else fail "manifest permissions"; cat /tmp/gpt_obsidian_permissions.out; fi
 
-for file in content.js background.js options.js; do
+for file in content.js background.js options.js branch-visualize.js branch-launch.js; do
   check_cmd "syntax $file" node --check "$file"
 done
 check_cmd "content behavior self-test" node tests/previous-qa-html-learning-self-test.js
@@ -78,10 +78,35 @@ check_cmd "generated artifact mapping self-test" node tests/generated-markdown-a
 check_cmd "options path persistence self-test" node tests/options-path-settings-self-test.js
 check_cmd "background clipboard permission self-test" node tests/background-clipboard-permission-self-test.js
 check_cmd "Visualize share reference self-test" node tests/visualize-share-reference-self-test.js
+check_cmd "Branch Visualize self-test" node tests/branch-visualize-self-test.js
 
 check_cmd "manifest JSON" python3 -m json.tool manifest.json
 check_cmd "English locale JSON" python3 -m json.tool _locales/en/messages.json
 check_cmd "Korean locale JSON" python3 -m json.tool _locales/ko/messages.json
+if python3 - <<'PY' >/tmp/gpt_obsidian_runtime_assets.out 2>&1
+import json, re
+from pathlib import Path
+manifest = json.loads(Path('manifest.json').read_text())
+assert manifest['content_scripts'][0]['js'] == ['branch-visualize.js', 'content.js']
+required = set(manifest['content_scripts'][0]['js']) | {
+    manifest['background']['service_worker'], manifest['options_page'],
+    'options.js', 'branch-launch.html', 'branch-launch.js'
+}
+for page in ('branch-launch.html', 'options.html'):
+    required.update(re.findall(r'<script[^>]+src=["\']([^"\']+)', Path(page).read_text()))
+package = Path('scripts/package-release.sh').read_text()
+extension = package.split('copy_items "gpt-to-obsidian-saver-v${VERSION}-unpacked-extension.zip"', 1)[1].split('\n\n', 1)[0]
+for path in sorted(required):
+    assert Path(path).is_file(), f'missing runtime asset: {path}'
+    assert path in extension.split(), f'unpackaged runtime asset: {path}'
+print('runtime references and extension package assets agree')
+PY
+then
+  pass "runtime and package asset dependencies"
+else
+  fail "runtime and package asset dependencies"
+  sed 's/^/  /' /tmp/gpt_obsidian_runtime_assets.out
+fi
 PYCACHE_TMP="$(mktemp -d)"
 if PYTHONPYCACHEPREFIX="$PYCACHE_TMP" python3 -m py_compile native-host/native-open-obsidian.py >/tmp/gpt_obsidian_validate.out 2>/tmp/gpt_obsidian_validate.err; then
   pass "Python compile"
@@ -106,11 +131,11 @@ fi
 required_files=(
   .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml
   .github/ISSUE_TEMPLATE/config.yml .github/PULL_REQUEST_TEMPLATE.md .gitignore
-  CHANGELOG.md CONTRIBUTING.md LICENSE README.md README.ko.md RELEASE_CHECKLIST.md RELEASE_CHECKLIST_v1.5.50.md RELEASE_CHECKLIST_v1.5.52.md RELEASE_CHECKLIST_v1.5.53.md RELEASE_CHECKLIST_v1.5.54.md SECURITY.md
+  CHANGELOG.md CONTRIBUTING.md LICENSE README.md README.ko.md RELEASE_CHECKLIST.md RELEASE_CHECKLIST_v1.5.50.md RELEASE_CHECKLIST_v1.5.52.md RELEASE_CHECKLIST_v1.5.53.md RELEASE_CHECKLIST_v1.5.54.md RELEASE_CHECKLIST_v1.5.62.md SECURITY.md
   _locales/en/messages.json _locales/ko/messages.json
   assets/demo.gif assets/screenshots/01-chatgpt-save-button.png assets/screenshots/03-obsidian-note.png
   assets/screenshots/04-html-attachment.png assets/screenshots/README.md
-  background.js content.js manifest.json options.html options.js
+  background.js branch-visualize.js branch-launch.html branch-launch.js content.js manifest.json options.html options.js
   docs/architecture.md docs/github-installation.md docs/manual-smoke-test.md docs/manual-smoke-test-v1.5.50.md
   docs/native-messaging.md docs/permissions.md docs/privacy.md docs/privacy.ko.md docs/release.md docs/troubleshooting.md
   icons/icon16.png icons/icon48.png icons/icon128.png
@@ -120,6 +145,7 @@ required_files=(
   scripts/package-release.sh scripts/validate-release.sh
   tests/background-clipboard-permission-self-test.js tests/generated-markdown-and-multi-html-self-test.js
   tests/options-path-settings-self-test.js tests/previous-qa-html-learning-self-test.js tests/visualize-share-reference-self-test.js
+  tests/branch-visualize-self-test.js tests/branch-visualize-browser-fixture.html tests/message-dom-browser-fixture.html
 )
 
 missing=0

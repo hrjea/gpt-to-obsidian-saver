@@ -1,6 +1,6 @@
 # Architecture
 
-Status: public architecture overview for version v1.5.54. Validation and release delivery are recorded separately in [the release checklist](../RELEASE_CHECKLIST_v1.5.54.md).
+Status: public architecture overview for version v1.5.62. Validation and release delivery are recorded separately in [the release checklist](../RELEASE_CHECKLIST_v1.5.62.md).
 
 ## System context
 
@@ -47,6 +47,10 @@ There is no developer-operated application server. Extraction and note writing a
 - Correlates downloads with the current save window and expected filenames.
 - Rejects duplicate URI/save requests for a short bounded period.
 - Normalizes Native helper responses before returning them to the content script.
+
+### `branch-visualize.js` / `branch-launch.html` / `branch-launch.js`
+
+The explicit Branch & visualize action opens one extension staging tab, verifies its authenticated one-shot handoff, and navigates to ChatGPT's native branch page. It correlates the exact source answer with one destination, accepts the native temporary WEB draft only as that correlated destination, verifies the native Visualize mention and empty composer, and authorizes one Send. Changed answers/routes, drafts, user input, missing controls and expired attempts stop automation. It does not create Share links, read the clipboard, invoke Native or save notes. Short-lived IDs/routes, answer hash and attempt state use session storage with a two-minute expiry.
 
 ### `options.js` / `options.html`
 
@@ -99,7 +103,7 @@ This supplemental Share flow applies to non-project conversations.
 
 1. Content script inventories visible file and rich-artifact expectations; project saves retain initial expectations and match rich content to the actual selected current/previous-Q&A body.
 2. It reads page-accessible HTML or a unique detailed Markdown viewer when possible. After this attempt opens HTML Code, it waits for bounded, uniquely scoped Preview restoration before ordinary Share proof. Unconfirmed restoration stops ordinary saving; genuine answer changes still fail the original proof. Already-open Code views and project local guards are preserved.
-3. If required, it starts a bounded exact-current download watch before asking for the one real user click.
+3. Current inline file references and resource rows remain expected-file evidence. The selected answer's collapsed list is expanded when needed. Every remaining HTML name, including siblings of an already readable index, uses its own exact-current download watch followed by the unique current download control; a user click prompt remains available when automatic activation does not produce the download. The shared HTML batch deadline is 90 seconds and the name bound is 100. Runtime loss, wrong names and missing/ambiguous controls remain incomplete. Canonical row names are retained when Chrome adds duplicate suffixes so Native can rewrite sibling links.
 4. It compares expected and captured deliverables.
 5. Missing content cancels by default; supported partial capture requires explicit consent.
 6. Runtime checks complete before the final save; Native-only artifact flows require the configured Vault path/helper and Native preflight. Non-project ordinary artifacts then require one consented, validated supplemental Share link; project artifacts omit that stage.
@@ -139,7 +143,7 @@ This fallback is available only outside recognized project conversations, is bro
 
 ### ChatGPT DOM
 
-ChatGPT page structure is untrusted and changes over time. Selection, artifact, control and URL evidence is validated within the active local-capture or Share boundary. Project local saves use the exact selected-node/role/ID, route and runtime guard above rather than supplemental full-content/provenance fingerprints. For non-project specialized sharing, one mounted DOM window is not assumed to contain the complete chronology; virtualized windows may be joined only through exact bounded overlap proof. A detached A1 conversion clone and a following-turn geometry anchor cannot operate Share UI or establish chronology. Response Share portal/remount evidence is attempt-local. Text similarity alone is not sufficient provenance.
+ChatGPT page structure is untrusted and changes over time. Legacy message roles and current search-unit layouts are both supported; native identity, nested units, role conflicts and response-toolbar ambiguity are checked before acting. Selection, artifact, control and URL evidence is validated within the active local-capture or Share boundary. Project local saves use the exact selected-node/role/ID, route and runtime guard above rather than supplemental full-content/provenance fingerprints. For non-project specialized sharing, one mounted DOM window is not assumed to contain the complete chronology; virtualized windows may be joined only through exact bounded overlap proof. A detached A1 conversion clone and a following-turn geometry anchor cannot operate Share UI or establish chronology. Response Share portal/remount evidence is attempt-local. Text similarity alone is not sufficient provenance.
 
 ### Clipboard
 

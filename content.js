@@ -1,7 +1,7 @@
 
-// content.js (1.5.54) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.62) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.54";
+  const VERSION = "1.5.62";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
@@ -244,7 +244,14 @@
     return I18N[language]?.[key] || I18N[DEFAULT_LANGUAGE][key] || key;
   }
 
+  const branchVisualize = globalThis.GPT2OBSBranchVisualize?.createContent(
+    VERSION, () => normalizeLanguage(settings.uiLanguage),
+    () => state.activeSaves.size > 0 || state.activeVisualizeAttempts.size > 0,
+    { getTurns: getAllMessageNodes, getRole: roleAttrForNode, getMessageId: messageIdForNode, getUserText: questionNodeToPlainText }
+  );
+
   function updateInjectedButtonText() {
+    branchVisualize?.updateLabels();
     document.querySelectorAll(".gpt2obs-btn").forEach((button) => {
       if (button.dataset.gpt2obsBusy !== "true") {
         button.textContent = t("saveButton");
@@ -1268,7 +1275,7 @@
       : "";
     const title = makeTitle(questionText || answerText);
     const filePath = buildFilePath(title);
-    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    const currentTurn = closestConversationTurn(currentAssistantNode) || null;
     const targetTurnId = String(currentTurn?.getAttribute?.("data-turn-id") || "").trim();
     const markdown = mode === "direct-visualize"
       ? buildDirectVisualizeShareMarkdownDraft({ title, sourceUrl, questionText, explanationText, richArtifactsExpected })
@@ -1607,10 +1614,38 @@
     } catch { return ""; }
   }
 
+  // Search-unit DOM: a grouped turn may contain both a question and an answer.
+  // Only accept one corroborated role and one native message ID per unit.
+  function searchUnitInfo(node, allowMergedProvenance = false) {
+    const key = node?.getAttribute?.("data-chatgpt-search-unit-key") || "";
+    const role = /:\d+:(user|assistant)$/.exec(key)?.[1] || "";
+    if (!role || node.parentElement?.closest?.("[data-chatgpt-search-unit-key]") ||
+        node.querySelector?.("[data-chatgpt-search-unit-key], [data-message-author-role]")) return null;
+    const ids = [...new Set(String(node.getAttribute("data-chatgpt-search-message-ids") || "").trim().split(/\s+/).filter(Boolean))];
+    if (!ids.length || (ids.length !== 1 && !allowMergedProvenance)) return null;
+    const content = nodesIncludingRoot(node, "[data-content-search-unit-key]");
+    if (content.length !== 1 || content[0].getAttribute("data-content-search-unit-key") !== key) return null;
+    const headings = Array.from(node.querySelectorAll("h4[data-conversation-role]"));
+    if (role === "assistant") {
+      if (headings.length !== 1 || headings[0].parentElement !== node || headings[0].getAttribute("data-conversation-role") !== role) return null;
+    } else if (headings.length || !node.classList?.contains("group/user-message")) return null;
+    return { role, messageId: ids.length === 1 ? ids[0] : "", ids };
+  }
+
+  function messageIdForNode(node) {
+    return String(node?.getAttribute?.("data-message-id") || searchUnitInfo(node)?.messageId || "");
+  }
+
+  function closestConversationTurn(node) {
+    const unit = node?.closest?.("[data-chatgpt-search-unit-key]");
+    return unit || node?.closest?.("[data-testid^='conversation-turn-']") || null;
+  }
+
   function closestMessageContainer(el) {
+    const unit = el?.closest?.("[data-chatgpt-search-unit-key]");
+    if (unit) return searchUnitInfo(unit) ? unit : null;
     return el?.closest?.('[data-message-author-role]') ||
-      el?.closest?.('article, li, [role="listitem"]') ||
-      null;
+      el?.closest?.('article, li, [role="listitem"]') || null;
   }
 
   function closestArtifactContainer(el) {
@@ -1619,7 +1654,7 @@
     // GPT 5.6 can render generated file cards as siblings of the narrow
     // data-message-author-role node. Keep answer conversion scoped to the
     // message, but inspect the complete conversation turn for artifacts.
-    const turn = el.closest?.("[data-testid^='conversation-turn-']");
+    const turn = closestConversationTurn(el);
     if (turn) return turn;
 
     const message = closestMessageContainer(el);
@@ -1636,7 +1671,7 @@
   }
 
   function roleAttrForNode(el) {
-    return String(el?.getAttribute?.("data-message-author-role") || "").toLowerCase();
+    return String(el?.getAttribute?.("data-message-author-role") || searchUnitInfo(el)?.role || "").toLowerCase();
   }
 
   function getMessageRole(node) {
@@ -1644,6 +1679,7 @@
     if (roleAttr.includes("user")) return "user";
     if (roleAttr.includes("assistant")) return "assistant";
 
+    if (node?.matches?.("[data-chatgpt-search-unit-key]")) return "";
     const txt = node?.textContent?.slice(0, 80) || "";
     if (/^(You|사용자)\b/i.test(txt.trim())) return "user";
     if (node?.matches?.("article") && txt.trim()) return "assistant";
@@ -1665,7 +1701,10 @@
 
   function getAllMessageNodes() {
     const root = document.querySelector('main') || document.body;
-    const roleNodes = dedupeMessageNodes(Array.from(root.querySelectorAll('[data-message-author-role]')));
+    const roleNodes = dedupeMessageNodes([
+      ...root.querySelectorAll('[data-message-author-role]'),
+      ...root.querySelectorAll('[data-chatgpt-search-unit-key]')
+    ].sort((a, b) => (a.compareDocumentPosition?.(b) & 2) ? 1 : (a.compareDocumentPosition?.(b) & 4) ? -1 : 0));
     if (roleNodes.length) return roleNodes;
     return dedupeMessageNodes(Array.from(root.querySelectorAll('article, li, [role="listitem"]')));
   }
@@ -1788,14 +1827,14 @@
   }
 
   function hasEarlierAssistantResponseVariant(currentAssistantNode) {
-    const currentTurn = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || null;
+    const currentTurn = closestConversationTurn(currentAssistantNode) || null;
     const turnRoot = currentTurn || currentAssistantNode;
     if (!turnRoot?.querySelectorAll) return false;
     return nodesIncludingRoot(turnRoot, "button, [role='button']").some(control => {
       const label = String(control.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
       if (!/^(?:previous response|이전 응답)$/i.test(label)) return false;
       if (!isVisibleEnabledControl(control)) return false;
-      const controlTurn = control.closest?.("[data-testid^='conversation-turn-']") || null;
+      const controlTurn = closestConversationTurn(control) || null;
       return !currentTurn || controlTurn === currentTurn;
     });
   }
@@ -2099,7 +2138,7 @@
     const title = button.getAttribute("title") || "";
     const marker = `${text} ${aria} ${testid} ${title}`;
 
-    if (button.classList?.contains("gpt2obs-btn") || text === "Obsidian 저장" || text === "Save to Obsidian") return true;
+    if (button.classList?.contains("gpt2obs-btn") || button.classList?.contains("gpt2obs-visualize-btn") || text === "Obsidian 저장" || text === "Save to Obsidian") return true;
     if (/citation|source|출처|인용|근거/i.test(marker)) return false;
     if (!text) return true;
 
@@ -2112,7 +2151,7 @@
       root.querySelectorAll("button").forEach(button => {
         if (shouldRemoveButton(button)) button.remove();
       });
-      root.querySelectorAll("nav, menu, style, svg, path").forEach(n => n.remove());
+      root.querySelectorAll("nav, menu, style, svg, path, h4.sr-only[data-conversation-role]").forEach(n => n.remove());
     } catch {}
   }
 
@@ -2435,6 +2474,13 @@
         entries.push({ turn, order, ambiguous: true, role: "" });
       }
     });
+    for (const node of scope.querySelectorAll?.("[data-chatgpt-search-unit-key]") || []) {
+      if (topLevelRoots.some(turn => turn.contains?.(node))) continue;
+      const info = searchUnitInfo(node);
+      entries.push({ turn: node, node, role: info?.role || "", ambiguous: !info });
+    }
+    entries.sort((a, b) => (a.turn.compareDocumentPosition?.(b.turn) & 2) ? 1 : (a.turn.compareDocumentPosition?.(b.turn) & 4) ? -1 : 0);
+    entries.forEach((entry, order) => { entry.order = order; });
     return entries;
   }
 
@@ -2470,7 +2516,7 @@
     const turnId = String(
       turn.getAttribute?.("data-turn-id") ||
       turn.getAttribute?.("data-message-id") ||
-      node.getAttribute?.("data-message-id") ||
+      messageIdForNode(node) ||
       ""
     ).trim();
     const testId = String(turn.getAttribute?.("data-testid") || "").trim();
@@ -2489,7 +2535,7 @@
     if (!turn) return "";
     const turnId = String(
       turn.getAttribute?.("data-turn-id") ||
-      turn.getAttribute?.("data-message-id") ||
+      messageIdForNode(turn) ||
       ""
     ).trim();
     const testId = String(turn.getAttribute?.("data-testid") || "").trim();
@@ -2518,7 +2564,7 @@
   // attributes and text are evidence, never a remount-capable identity.
   function supplementalCanonicalTurnScope(candidate) {
     if (!candidate) return null;
-    const conversationTurn = candidate.closest?.("[data-testid^='conversation-turn-']") || null;
+    const conversationTurn = closestConversationTurn(candidate) || null;
     if (conversationTurn) return conversationTurn;
     const declaredTurn = candidate.closest?.("[data-turn]") || null;
     if (declaredTurn) return declaredTurn;
@@ -2531,6 +2577,7 @@
   }
 
   function supplementalStableTurnId(turnScope, node) {
+    if (turnScope?.matches?.("[data-chatgpt-search-unit-key]")) return searchUnitInfo(turnScope)?.messageId || "";
     const messageScope = node?.closest?.("[data-message-id]") || null;
     const scopedMessageId = messageScope && turnScope?.contains?.(messageScope)
       ? messageScope.getAttribute?.("data-message-id")
@@ -2545,6 +2592,16 @@
 
   function supplementalShareEntryForTurnScope(turnScope) {
     if (!turnScope) return null;
+    if (turnScope.matches?.("[data-chatgpt-search-unit-key]")) {
+      const info = searchUnitInfo(turnScope, true);
+      const provenanceOnly = !!info && info.ids.length > 1;
+      return { node: turnScope, role: info?.role || "", turnId: info?.messageId || "",
+        ambiguous: !info || (provenanceOnly && info.role !== "assistant"), provenanceOnly,
+        // A merged block has no singular native target. Freeze the ordered IDs
+        // on this exact connected node; never use a composite ID for remounts.
+        provenanceKey: provenanceOnly ? JSON.stringify(info.ids) : "", nativeIds: info?.ids || [] };
+
+    }
     const roleNodes = nodesIncludingRoot(turnScope, "[data-message-author-role]");
     if (!roleNodes.length) {
       const isCanonicalTurn = turnScope.matches?.(
@@ -2602,8 +2659,15 @@
     const candidates = nodesIncludingRoot(
       root,
       "[data-testid^='conversation-turn-'], [data-turn], [data-turn-id], [data-message-id], [data-message-author-role]"
-    );
-    return supplementalShareEntries(candidates);
+    ).filter(node => !node.matches?.("button[data-testid='pin-message-turn-action-button']"));
+    const units = nodesIncludingRoot(root, "[data-chatgpt-search-unit-key]");
+    const entries = supplementalShareEntries([...new Set([...candidates, ...units])]
+      .sort((a, b) => (a.compareDocumentPosition?.(b) & 2) ? 1 : (a.compareDocumentPosition?.(b) & 4) ? -1 : 0));
+    for (const entry of entries) {
+      if (entry.nativeIds?.some(id => entries.some(other => other !== entry &&
+          (other.nativeIds?.includes(id) || other.turnId === id)))) entry.ambiguous = true;
+    }
+    return entries;
   }
 
   function supplementalConnectedStableIdMatches(entries, turnId) {
@@ -2620,7 +2684,8 @@
     if (!routeKey) return captureFailure("conversation route is missing");
     const entries = supplementalShareProofEntries(options.nodes);
     const currentMatches = entries.filter(entry => entry.node === currentAssistantNode);
-    if (currentMatches.length !== 1 || currentMatches[0].role !== "assistant") {
+    if (currentMatches.length !== 1 || currentMatches[0].role !== "assistant" ||
+        currentMatches[0].ambiguous || currentMatches[0].provenanceOnly) {
       return captureFailure("selected assistant turn is missing or ambiguous");
     }
     const selectedEntry = currentMatches[0];
@@ -2649,7 +2714,8 @@
       interveningAssistants.unshift(Object.freeze({
         node: entry.node,
         turnId: entry.turnId,
-        fingerprint: stableTurnFingerprint(text)
+        fingerprint: stableTurnFingerprint(text),
+        provenanceKey: entry.provenanceKey || ""
       }));
     }
     if (!questionEntry) return captureFailure("selected assistant has no earlier user predecessor");
@@ -2704,7 +2770,7 @@
     } else {
       return { ok: false, stage: "revalidate", reason: "ID-less selected assistant was replaced" };
     }
-    if (!assistantEntry || assistantEntry.role !== "assistant" ||
+    if (!assistantEntry || assistantEntry.ambiguous || assistantEntry.provenanceOnly || assistantEntry.role !== "assistant" ||
         assistantEntry.turnId !== targetTurnId ||
         stableTurnFingerprint(supplementalAssistantText(assistantEntry.node)) !== proof.assistantFingerprint) {
       return { ok: false, stage: "revalidate", reason: "selected assistant changed" };
@@ -2721,7 +2787,8 @@
       const frozenEntry = proof.interveningAssistants[index];
       const currentEntry = currentInterveningAssistants[index];
       if (!frozenEntry?.node || !frozenEntry?.fingerprint ||
-          !currentEntry || currentEntry.ambiguous || currentEntry.role !== "assistant") {
+          !currentEntry || currentEntry.ambiguous || currentEntry.role !== "assistant" ||
+          (currentEntry.provenanceKey || "") !== (frozenEntry.provenanceKey || "")) {
         return { ok: false, stage: "revalidate", reason: "selected response topology changed" };
       }
       const frozenTurnId = String(frozenEntry.turnId || "").trim();
@@ -3866,7 +3933,7 @@
 
     const root = options.root?.querySelectorAll ? options.root : document;
     const entries = getVerifiedConversationTurnEntries(root);
-    const currentTurn = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || null;
+    const currentTurn = closestConversationTurn(currentAssistantNode) || null;
     const a2Index = entries.findIndex(entry => entry.turn === currentTurn);
     if (a2Index < 0) return synchronous;
     const q2 = [...entries.slice(0, a2Index)].reverse()
@@ -4145,7 +4212,7 @@
   }
 
   function visualizeAttemptKeyForNode(currentAssistantNode) {
-    const turn = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || null;
+    const turn = closestConversationTurn(currentAssistantNode) || null;
     if (!turn) return "";
     const turnKey = verifiedTurnIdentity({ turn, node: currentAssistantNode }) || String(
       turn.getAttribute?.("data-turn-id") || turn.getAttribute?.("data-testid") || ""
@@ -4161,7 +4228,7 @@
       return unresolved("current node is not an assistant turn");
     }
 
-    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    const currentTurn = closestConversationTurn(currentAssistantNode) || null;
     if (!currentTurn) return unresolved("current assistant conversation turn was not found");
     const richAnswer = collectRichAppBlockCandidates(currentAssistantNode);
     if (!richAnswer.length) return unresolved("current assistant has no rich Visualize app block");
@@ -4276,7 +4343,7 @@
     const richAppEvidence = resolveProviderNeutralRichAppEvidence(currentAssistantNode);
     if (!richAppEvidence.ok) return unresolved(richAppEvidence.reason || "current assistant has no verified rich app runtime");
 
-    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    const currentTurn = closestConversationTurn(currentAssistantNode) || null;
     const entries = getVerifiedConversationTurnEntries();
     const currentMatches = entries.filter(entry => entry.turn === currentTurn);
     if (currentMatches.length !== 1) return unresolved("current assistant turn is missing or duplicated");
@@ -4374,7 +4441,7 @@
       return unresolved("current node is not an assistant turn");
     }
 
-    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    const currentTurn = closestConversationTurn(currentAssistantNode) || null;
     if (!currentTurn) return unresolved("current assistant conversation turn was not found");
     if (!collectRichAppBlockCandidates(currentAssistantNode).length) {
       return unresolved("current assistant has no rich app block");
@@ -4563,7 +4630,7 @@
   function conversationShareCopySignalEntries(root = document) {
     const candidates = nodesIncludingRoot(root || document, "[role='status'], [role='alert'], [aria-live]")
       .filter(node => node?.isConnected !== false)
-      .filter(node => !node?.closest?.("[data-testid^='conversation-turn-']"))
+      .filter(node => !closestConversationTurn(node))
       .filter(node => elementVisibilityDetails(node).visible);
     const entries = [];
     const seen = new Set();
@@ -5826,7 +5893,7 @@
       }
       triggerResolution = liveResolution;
     }
-    artifactDebugLog("selected-share-trigger", { selected: true, kind: shareKind, trigger: shareElementDiagnostic(shareButton, currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode) });
+    artifactDebugLog("selected-share-trigger", { selected: true, kind: shareKind, trigger: shareElementDiagnostic(shareButton, closestConversationTurn(currentAssistantNode) || currentAssistantNode) });
     const beforeDialogs = captureShareSurfaceSnapshots(getDialogs() || []);
     const beforeCopySignals = shareKind === "conversation"
       ? captureConversationShareCopySignals(root)
@@ -5840,7 +5907,7 @@
     if (!beforeShareClickContext.ok) {
       return fail(beforeShareClickContext.stage, beforeShareClickContext.reason);
     }
-    const triggerBeforeClick = shareElementDiagnostic(shareButton, currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode);
+    const triggerBeforeClick = shareElementDiagnostic(shareButton, closestConversationTurn(currentAssistantNode) || currentAssistantNode);
     try {
       shareButton.click();
       if (shareKind === "conversation") conversationShareActionOccurred = true;
@@ -5849,7 +5916,7 @@
     }
     artifactDebugLog("trigger-click-dispatched", {
       before: triggerBeforeClick,
-      after: shareElementDiagnostic(shareButton, currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode)
+      after: shareElementDiagnostic(shareButton, closestConversationTurn(currentAssistantNode) || currentAssistantNode)
     });
 
     let dialogResult;
@@ -6275,7 +6342,10 @@
 
   function collectFileLikeLinks(container, extensions = FILE_DELIVERABLE_EXTENSIONS) {
     if (!container?.querySelectorAll) return [];
-    const links = Array.from(container.querySelectorAll("a, [role='link']"));
+    const links = Array.from(new Set([
+      ...container.querySelectorAll("a, [role='link']"),
+      ...container.querySelectorAll('[data-file-reference="true"][role="button"]')
+    ]));
     const entries = [];
     const seen = new Set();
 
@@ -6374,7 +6444,7 @@
       return unresolved("current node is not an assistant turn");
     }
 
-    const currentTurn = currentAssistantNode.closest?.("[data-testid^='conversation-turn-']") || null;
+    const currentTurn = closestConversationTurn(currentAssistantNode) || null;
     if (!currentTurn) return unresolved("current assistant conversation turn was not found");
     const currentMatches = getVerifiedConversationTurnEntries().filter(entry => entry.turn === currentTurn);
     if (currentMatches.length !== 1) {
@@ -6817,6 +6887,7 @@
       node?.getAttribute?.("title") || "",
       node?.getAttribute?.("data-file-name") || "",
       node?.getAttribute?.("data-filename") || "",
+      node?.getAttribute?.("data-markdown-copy-text") || "",
       node?.innerText || node?.textContent || ""
     ].map(value => decodePercentEncodedRuns(String(value || "")));
   }
@@ -6911,7 +6982,7 @@
         };
       }
     } catch {}
-    const turn = node.closest?.("[data-testid^='conversation-turn-']") || null;
+    const turn = closestConversationTurn(node) || null;
     const parent = node.parentElement || null;
     return {
       tag: String(node.tagName || "").toUpperCase(),
@@ -6993,7 +7064,26 @@
     return score;
   }
 
+  function searchUnitResponseRoot(node) {
+    if (!searchUnitInfo(node) || roleAttrForNode(node) !== "assistant") return null;
+    for (let root = node.parentElement, depth = 0; root && depth < 4; root = root.parentElement, depth++) {
+      const toolbar = Array.from(root.children || []).filter(n => n.classList?.contains("turn-action-controls"));
+      if (!toolbar.length) continue;
+      const units = Array.from(root.querySelectorAll("[data-chatgpt-search-unit-key]"));
+      if (units.some(n => !searchUnitInfo(n))) return null;
+      const answers = units.filter(n => roleAttrForNode(n) === "assistant");
+      return toolbar.length === 1 && answers.length === 1 && answers[0] === node ? root : null;
+    }
+    return null;
+  }
+
   function isResponseActionToolbarControl(node, turnRoot) {
+    const units = Array.from(turnRoot?.querySelectorAll?.("[data-chatgpt-search-unit-key]") || []);
+    if (turnRoot?.matches?.("[data-chatgpt-search-unit-key]") || units.length) {
+      // Never accept a response-looking toolbar embedded in answer/prompt text.
+      const toolbar = node?.closest?.(".turn-action-controls");
+      return toolbar?.parentElement === turnRoot && units.some(n => searchUnitResponseRoot(n) === turnRoot);
+    }
     let ancestor = node?.parentElement || null;
     for (let depth = 0; depth < 7 && ancestor; depth++, ancestor = ancestor.parentElement) {
       if (ancestor === turnRoot?.parentElement) break;
@@ -7012,7 +7102,7 @@
   }
 
   function resolveResponseShareTrigger(currentAssistantNode) {
-    const root = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode;
+    const root = searchUnitResponseRoot(currentAssistantNode) || closestConversationTurn(currentAssistantNode) || currentAssistantNode;
     if (!root?.querySelectorAll) {
       return {
         status: "missing",
@@ -7059,7 +7149,7 @@
   }
 
   function isModalDisabledApprovedResponseShareControl(currentAssistantNode, approvedControl) {
-    const root = currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']") || currentAssistantNode;
+    const root = searchUnitResponseRoot(currentAssistantNode) || closestConversationTurn(currentAssistantNode) || currentAssistantNode;
     if (!root?.querySelectorAll || !approvedControl || approvedControl.isConnected === false) return false;
     if (!isControlDisabled(approvedControl) || approvedControl.hidden === true) return false;
     if (/^true$/i.test(String(approvedControl.getAttribute?.("aria-hidden") || ""))) return false;
@@ -7108,7 +7198,7 @@
   function resolveConversationShareTrigger(root = document) {
     const candidates = nodesIncludingRoot(root, "[data-testid='share-chat-button']")
       .filter(node => node?.isConnected !== false)
-      .filter(node => !node?.closest?.("[data-testid^='conversation-turn-']"))
+      .filter(node => !closestConversationTurn(node))
       .filter(node => String(node?.getAttribute?.("data-testid") || "") !== "share-prompt-link-turn-action-button")
       .filter(node => !node?.closest?.('[data-app-block-preview="true"]'))
       .filter(node => {
@@ -7499,7 +7589,7 @@
 
   function artifactRowDebugSummary(item) {
     const rowNode = item?.row || null;
-    const turn = rowNode?.closest?.("[data-testid^='conversation-turn-']") || null;
+    const turn = closestConversationTurn(rowNode) || null;
     const controls = Array.from(rowNode?.querySelectorAll?.("button, a[href], [role='button']") || []);
     return {
       name: item?.name || "",
@@ -7549,7 +7639,7 @@
       if (node && !controls.includes(node)) controls.unshift(node);
       const names = new Set(controls.map(control => filenameFromArtifactNode(control, extensions)).filter(Boolean));
       const className = String(current.className || current.getAttribute?.("class") || "");
-      const rowMarker = /(?:^|[\s/:-])(?:artifact|file)(?:[\s/:-]|$)/i.test(className) || /artifact-row/i.test(className);
+      const rowMarker = /(?:^|[\s/:-])(?:artifact|file)(?:[\s/:-]|$)/i.test(className) || /(?:artifact|resource)-row/i.test(className);
       const hasDownloadControl = controls.some(control => isExactDownloadControl(control) || hasDownloadAttribute(control));
       const hasFileHref = controls.some(control => isKnownChatGptFileHref(findDownloadHref(control)));
       if (names.size === 1 && (hasDownloadControl || hasFileHref || rowMarker)) {
@@ -7580,14 +7670,16 @@
       if (!ownName) continue;
       const detectedRow = findArtifactFileRow(node, container, extensions);
       if (!detectedRow) continue;
-      const nearestArtifactRow = node.closest?.("[class*='artifact-row']") || detectedRow;
+      const nearestArtifactRow = node.closest?.("[class*='artifact-row']") || node.closest?.("[class*='resource-row']") || detectedRow;
       const row = nearestArtifactRow || detectedRow;
       const controls = Array.from(row.querySelectorAll?.("button, a[href], [role='button']") || []);
       if (!controls.includes(node)) controls.unshift(node);
       const names = Array.from(new Set(controls.map(control => filenameFromArtifactNode(control, extensions)).filter(Boolean)));
       const name = names.length === 1 ? names[0] : ownName;
       const openButton = controls.find(control => filenameFromArtifactNode(control, extensions) === name && !isExactDownloadControl(control)) || node;
-      const downloadButton = controls.find(isExactDownloadControl) || controls.find(hasDownloadAttribute) || null;
+      const exactDownloads = controls.filter(isExactDownloadControl);
+      const downloadControls = exactDownloads.length ? exactDownloads : controls.filter(hasDownloadAttribute);
+      const downloadButton = downloadControls.length === 1 ? downloadControls[0] : null;
       const hrefEntry = [downloadButton, openButton, ...controls]
         .filter(Boolean)
         .map(control => ({ control, href: findDownloadHref(control) }))
@@ -7604,8 +7696,9 @@
   }
 
   function isCollapsedArtifactListControl(button) {
+    if (button?.getAttribute?.("aria-expanded") === "true") return false;
     const label = controlLabel(button).replace(/\s+/g, " ").trim();
-    return /^\d+\s*개\s*더\s*보기$/i.test(label) || /^(?:show\s+)?\d+\s+more$/i.test(label);
+    return /^\d+\s*개\s*더(?:\s*보기)?$/i.test(label) || /^(?:show\s+)?\d+\s+more$/i.test(label);
   }
 
   async function revealCollapsedGeneratedArtifacts(container) {
@@ -9725,7 +9818,7 @@
       };
     }
 
-    const watchNames = htmlExpectedNamesForCandidate(candidate, expectedNames);
+    const watchNames = options.autoActivate ? [candidate.downloadName || candidate.name] : htmlExpectedNamesForCandidate(candidate, expectedNames);
     const watch = await awaitWithRuntimeGuard(
       beginHtmlDownloadWatch(watchNames),
       runtimeGuard,
@@ -9765,9 +9858,43 @@
       };
     }
 
-    const restore = revealDownloadCandidate(candidate);
-    alert(t("htmlDownloadActionRequired"));
-    try { candidate.node?.focus?.({ preventScroll: true }); } catch {}
+    if (Number.isFinite(options.deadlineAt) && Date.now() >= options.deadlineAt) {
+      await cancelHtmlDownloadWatch(watchId);
+      failures.push({ name: candidate.name, reason: "HTML batch download deadline exceeded" });
+      return { downloadedFiles, clickedFallback, failures };
+    }
+
+    let currentCandidate = options.resolveCandidate ? options.resolveCandidate() : candidate;
+    if (!currentCandidate || currentCandidate.name !== candidate.name ||
+        (options.autoActivate && (!elementVisibilityDetails(currentCandidate.node).visible ||
+          !(isExactDownloadControl(currentCandidate.node) || hasDownloadAttribute(currentCandidate.node))))) {
+      await cancelHtmlDownloadWatch(watchId);
+      failures.push({ name: candidate.name, reason: "exact HTML download control is missing or ambiguous" });
+      return { downloadedFiles, clickedFallback, failures };
+    }
+    let restore = () => {};
+    let promptTimer = 0;
+    let deadlineTimer = 0;
+    const prompt = () => {
+      const promptRuntime = runtimeGuard?.checkSync?.("html-download-prompt") || { ok: true };
+      if (!promptRuntime.ok) return;
+      currentCandidate = options.resolveCandidate ? options.resolveCandidate() : candidate;
+      if (!currentCandidate || currentCandidate.name !== candidate.name) return;
+      restore = revealDownloadCandidate(currentCandidate);
+      alert(t("htmlDownloadActionRequired"));
+      try { currentCandidate.node?.focus?.({ preventScroll: true }); } catch {}
+    };
+    if (options.autoActivate) {
+      const activation = clickArtifactControl(currentCandidate.node);
+      if (!activation.attempted || activation.error) {
+        await cancelHtmlDownloadWatch(watchId);
+        failures.push({ name: candidate.name, reason: activation.error || "HTML download activation failed" });
+        return { downloadedFiles, clickedFallback, failures };
+      }
+      promptTimer = setTimeout(prompt, MARKDOWN_DOWNLOAD_PROMPT_DELAY_MS);
+    } else {
+      prompt();
+    }
     clickedFallback++;
     debugLog("waiting for user HTML download fallback", {
       name: candidate.name,
@@ -9777,14 +9904,23 @@
 
     let result;
     try {
-      result = await awaitWithRuntimeGuard(
+      const pending = awaitWithRuntimeGuard(
         awaitHtmlDownloadWatch(watchId),
         runtimeGuard,
         "html-download-watch-wait",
         { onRuntimeFailure: () => cancelHtmlDownloadWatch(watchId) }
       );
+      const remainingMs = Number.isFinite(options.deadlineAt) ? options.deadlineAt - Date.now() : options.timeoutMs;
+      result = Number.isFinite(remainingMs)
+        ? await Promise.race([pending, new Promise(resolve => {
+          deadlineTimer = setTimeout(() => resolve({ ok: false, error: "HTML batch download deadline exceeded" }), Math.max(1, remainingMs));
+        })])
+        : await pending;
     } finally {
+      clearTimeout(promptTimer);
+      clearTimeout(deadlineTimer);
       restore();
+      if (options.autoActivate) await cancelHtmlDownloadWatch(watchId);
     }
     if (isExtensionRuntimeFailure(result)) {
       runtimeGuard?.fail?.(result, "html-download-watch-wait");
@@ -9798,8 +9934,13 @@
     }
     if (result?.ok && result.download) {
       const download = result.download;
+      const downloadNameKey = value => artifactNameKey(value).replace(/\s+\(\d+\)(?=\.html?$)/i, "").replace(/\s+/g, "_");
+      if (options.autoActivate && downloadNameKey(download.name) !== downloadNameKey(candidate.name)) {
+        failures.push({ name: candidate.name, reason: "HTML download did not match the requested filename" });
+        return { downloadedFiles, clickedFallback, failures };
+      }
       downloadedFiles.push({
-        name: safeDownloadName(download.name || candidate.name),
+        name: options.autoActivate ? candidate.name : safeDownloadName(download.name || candidate.name),
         sourcePath: download.sourcePath,
         downloadId: download.id,
         startTime: download.startTime,
@@ -9815,6 +9956,47 @@
     }
 
     return { downloadedFiles, clickedFallback, failures };
+  }
+
+  async function captureRemainingHtmlArtifactRows(container, capturedFiles, options = {}) {
+    const result = { downloadedFiles: [], clickedFallback: 0, failures: [], expectedNames: [] };
+    const initialRows = collectArtifactFileRows(container, ["html", "htm"]);
+    result.expectedNames = Array.from(new Set(initialRows.map(row => row.name)));
+    const captured = new Set(capturedFiles.map(file => artifactNameKey(file.name)));
+    const startedAt = Date.now();
+    const batchTimeoutMs = Math.min(GENERATED_MARKDOWN_VIEWER_TIMEOUT_MS,
+      Number.isFinite(options.htmlBatchTimeoutMs) ? Math.max(1, options.htmlBatchTimeoutMs) : GENERATED_MARKDOWN_VIEWER_TIMEOUT_MS);
+    const deadlineAt = startedAt + batchTimeoutMs;
+    for (const name of result.expectedNames.slice(0, 100)) {
+      if (captured.has(artifactNameKey(name))) continue;
+      const timeoutMs = batchTimeoutMs - (Date.now() - startedAt);
+      if (timeoutMs <= 0) break;
+      const resolveCandidate = () => {
+        const matches = collectArtifactFileRows(container, ["html", "htm"])
+          .filter(row => row.name === name && elementVisibilityDetails(row.row).visible &&
+            elementVisibilityDetails(row.downloadButton).visible &&
+            (isExactDownloadControl(row.downloadButton) || hasDownloadAttribute(row.downloadButton)));
+        const controls = Array.from(new Set(matches.map(row => row.downloadButton)));
+        if (controls.length !== 1) return null;
+        const downloadName = artifactNodeTextValues(matches[0].openButton)
+          .map(value => filenameFromArtifactText(value, ["html", "htm"]))
+          .find(value => value && safeDownloadName(value) === name) || name;
+        return { name, downloadName, node: controls[0], href: "" };
+      };
+      const candidate = resolveCandidate();
+      if (!candidate) {
+        result.failures.push({ name, reason: "exact HTML download control is missing or ambiguous" });
+        continue;
+      }
+      const capturedRow = await captureDownloadedHtmlFallback([candidate], [name], {
+        ...options, autoActivate: true, resolveCandidate, deadlineAt
+      });
+      result.downloadedFiles.push(...capturedRow.downloadedFiles);
+      result.clickedFallback += capturedRow.clickedFallback;
+      result.failures.push(...capturedRow.failures);
+      if (capturedRow.runtimeUnavailable) return { ...result, runtimeUnavailable: true, runtimeFailure: capturedRow.runtimeFailure };
+    }
+    return result;
   }
 
   async function extractDownloadFiles(btn, expectedNames = [], answerText = "", options = {}) {
@@ -9883,7 +10065,18 @@
     warnings.push(...validated.warnings);
     const safeFiles = validated.files;
 
-    if (files.length === 0 && safeFiles.length === 0) {
+    // File-card HTML is often outside the open viewer, and one readable index
+    // must not suppress the exact downloads of its separate chapter files.
+    const rowCapture = await captureRemainingHtmlArtifactRows(container, safeFiles, options);
+    downloadedFiles.push(...rowCapture.downloadedFiles);
+    clickedFallback += rowCapture.clickedFallback;
+    failures.push(...rowCapture.failures);
+    if (rowCapture.runtimeUnavailable) {
+      return { files: safeFiles, downloadedFiles, candidatesCount: candidates.length, clickedFallback, failures, warnings,
+        runtimeUnavailable: true, runtimeFailure: rowCapture.runtimeFailure };
+    }
+
+    if (files.length === 0 && safeFiles.length === 0 && rowCapture.expectedNames.length === 0) {
       const fallback = await captureDownloadedHtmlFallback(fallbackCandidates, expectedNames, {
         runtimeGuard,
         runtimePollIntervalMs: options.runtimePollIntervalMs
@@ -9932,6 +10125,7 @@
       clickedFallback,
       failures,
       warnings,
+      expectedHtmlNames: rowCapture.expectedNames,
       previewRestorationFailed: !!interactiveFiles.previewRestorationFailed
     };
   }
@@ -10331,7 +10525,7 @@
     const effectivePreviousQa = effectiveMode === "previous-qa" || effectiveMode === "previous-qa-rich-app"
       ? (previousQa || visualizeContext || null)
       : null;
-    const targetTurnId = String(preflight.targetTurnId || currentAssistantNode?.closest?.("[data-testid^='conversation-turn-']")?.getAttribute?.("data-turn-id") || "").trim();
+    const targetTurnId = String(preflight.targetTurnId || closestConversationTurn(currentAssistantNode)?.getAttribute?.("data-turn-id") || "").trim();
     if (effectiveShareKind === "conversation") {
       const conversationDraft = buildConversationShareMarkdownDraft({
         title: preflight.title,
@@ -10854,7 +11048,7 @@
       const projectConversation = isProjectConversationUrl(sourceUrl);
       const projectRouteKey = projectConversation ? conversationRouteKey() : "";
       const projectAssistantNode = projectConversation ? currentAssistantNode : null;
-      const projectAssistantId = projectAssistantNode?.getAttribute?.("data-message-id") || "";
+      const projectAssistantId = messageIdForNode(projectAssistantNode);
       const saveFailureMessage = failure => formatI18nTemplate(
         t(projectConversation ? "localSaveFailedPrefix" : "chatGptShareFailedPrefix"), failure
       );
@@ -10864,7 +11058,7 @@
         }
         if (!projectAssistantNode || projectAssistantNode.isConnected !== true ||
             roleAttrForNode(projectAssistantNode) !== "assistant" ||
-            (projectAssistantNode.getAttribute?.("data-message-id") || "") !== projectAssistantId) {
+            messageIdForNode(projectAssistantNode) !== projectAssistantId) {
           return { ok: false, stage: "preflight", reason: "project selected assistant changed" };
         }
         return { ok: true };
@@ -11152,7 +11346,8 @@
         ? (projectConversation ? projectPreviousQa : previousQaFinder(currentAssistantNode))
         : null;
       const fileLinks = [...projectFileLinks, ...collectFileLikeLinks(artifactContainer)];
-      const artifactRows = [...projectArtifactRows, ...collectArtifactFileRows(artifactContainer, FILE_DELIVERABLE_EXTENSIONS)];
+      const artifactRows = [...projectArtifactRows, ...collectArtifactFileRows(artifactContainer, FILE_DELIVERABLE_EXTENSIONS),
+        ...(extraction.expectedHtmlNames || []).map(name => ({ name }))];
       const fileIntegrity = assessArtifactIntegrity({
         fileLinks,
         artifactRows,
@@ -11487,6 +11682,7 @@
         if (existing.dataset.gpt2obsBusy !== "true") {
           existing.textContent = t("saveButton");
         }
+        branchVisualize?.attach(existing, m);
         return;
       }
       if (existing) existing.remove();
@@ -11497,6 +11693,7 @@
       btn.dataset.gpt2obsVersion = VERSION;
       btn.style.cssText = "margin-left:8px;padding:4px 8px;border:1px solid #888;border-radius:6px;background:#f6f6f6;cursor:pointer;font-size:12px;";
       btn.addEventListener('click', () => {
+        if (branchVisualize?.isBusy()) return;
         if (btn.dataset.gpt2obsBusy === "true") return;
         btn.dataset.gpt2obsBusy = "true";
         btn.disabled = true;
@@ -11514,6 +11711,7 @@
         });
       });
       toolbarHost.appendChild(btn);
+      branchVisualize?.attach(btn, m);
     });
   }
 
@@ -11521,16 +11719,12 @@
     const attach = (root=document) => {
       injectOwnButtons();
     };
-    const mo = new MutationObserver((muts) => {
-      muts.forEach(m => {
-        if (m.addedNodes && m.addedNodes.length) {
-          m.addedNodes.forEach(n => {
-            if (n.nodeType === 1) attach(n);
-          });
-        }
-      });
+    const mo = new MutationObserver(muts => {
+      if (muts.some(m => m.type === "attributes" ||
+          Array.from(m.addedNodes || []).some(n => n.nodeType === 1))) attach();
     });
-    mo.observe(document.documentElement, {childList:true, subtree:true});
+    mo.observe(document.documentElement, {childList:true, subtree:true, attributes:true,
+      attributeFilter:["data-chatgpt-search-unit-key", "data-content-search-unit-key", "data-chatgpt-search-message-ids", "data-conversation-role"]});
     attach();
   }
 
@@ -11630,6 +11824,7 @@
       normalizeFileCitationChips,
       isDecorativeContentImage,
       htmlToMarkdown,
+      extractAssistantMessageHTML,
       removeEmptyMarkdownLinkTargets,
       elementVisibilityDetails,
       isVisibleEnabledControl,
@@ -11695,4 +11890,5 @@
   }
 
   watchAssistantMessages();
+  void branchVisualize?.resume();
 })();

@@ -1,5 +1,7 @@
 // background.js (service worker)
-const VERSION = "1.5.54";
+const VERSION = "1.5.62";
+if (typeof importScripts === "function") importScripts("branch-visualize.js");
+const branchVisualizeMessage = globalThis.GPT2OBSBranchVisualize?.createBackground(chrome, VERSION);
 const RUNTIME_PING_TYPE = "gpt2obs-runtime-ping";
 const NATIVE_PREFLIGHT_TYPE = "gpt2obs-native-preflight";
 const NATIVE_OBSIDIAN_HOST = "com.gpt_obsidian_saver.open_direct";
@@ -151,10 +153,10 @@ function chooseMatchingDownload(items, watch) {
 
   const expectedMatches = allowedItems.filter(item => matchesExpectedDownloadName(item.filename, watch.expectedNames));
   if (expectedMatches.length) return latestDownload(expectedMatches);
-  // Markdown is note body content, so never accept a merely recent arbitrary
-  // .md download. It must match the file card selected for this Save action.
-  if (watch.kind === "markdown") return null;
-  if (!watch.expectedNames.length || allowedItems.length === 1) return latestDownload(allowedItems);
+  // A named watch must not accept a previous sibling or unrelated download.
+  // This applies to HTML batches as well as generated Markdown body content.
+  if (watch.kind === "markdown" || watch.expectedNames.length) return null;
+  if (allowedItems.length === 1) return allowedItems[0];
   return null;
 }
 
@@ -305,6 +307,11 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (typeof msg?.type === "string" && msg.type.startsWith("gpt2obs-branch-")) {
+    if (!branchVisualizeMessage) { sendResponse({ ok: false, stage: "runtime" }); return false; }
+    branchVisualizeMessage(msg, sender).then(sendResponse, () => sendResponse({ ok: false, stage: "background" }));
+    return true;
+  }
   if (msg && msg.type === "gpt2obs-request-clipboard-read-permission") {
     try {
       chrome.permissions.request({ permissions: ["clipboardRead"] }, granted => {

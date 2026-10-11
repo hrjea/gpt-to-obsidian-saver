@@ -4,7 +4,7 @@ GPT to Obsidian Saver는 local-first이며 사용자가 직접 실행한 저장 
 
 ## 처리되는 정보
 
-사용자가 Save to Obsidian을 클릭하면 확장 프로그램은 노트를 만들기 위해 필요한 ChatGPT 메시지와 주변 대화 맥락을 읽습니다. 또한 페이지에서 읽을 수 있는 HTML 또는 생성된 상세 Markdown artifact를 현재 assistant turn에서 확인하고, 페이지 추출이 불가능하면 현재 저장 동작에 정확히 대응하는 다운로드 하나를 확인할 수 있습니다.
+사용자가 Save to Obsidian을 클릭하면 확장 프로그램은 노트를 만들기 위해 필요한 ChatGPT 메시지와 주변 대화 맥락을 읽습니다. 또한 페이지에서 읽을 수 있는 HTML 또는 생성된 상세 Markdown artifact를 현재 assistant turn에서 확인하고, 페이지 추출이 불가능하면 현재 저장 동작에 정확히 대응하는 다운로드들을 확인할 수 있습니다.
 
 대화 텍스트는 브라우저 확장 프로그램 안에서 로컬로 처리됩니다. 현재 ChatGPT 페이지 URL은 Markdown frontmatter의 note source로 기록될 수 있습니다.
 
@@ -49,6 +49,12 @@ GPT to Obsidian Saver는 local-first이며 사용자가 직접 실행한 저장 
 - 사용자 데이터 판매 없음
 - 확장 프로그램이 수행하는 노트, vault 파일, 다운로드 첨부파일, 로그의 원격 업로드 없음. 일반 설정은 Chrome sync storage를 사용하므로 사용자의 브라우저/계정 설정에 따라 Chrome이 동기화할 수 있습니다.
 
-위에 설명한 명시적 ChatGPT Share 절차들이 현재 유일한 원격 공유 예외입니다. 이 절차는 개발자 서버나 비공개 ChatGPT API가 아니라 ChatGPT의 화면 UI와 서비스를 사용합니다. 버전 1.5.53은 required/optional permission, telemetry, 원격 note 저장소, runtime/Native payload field를 새로 추가하지 않습니다. 응답 Create/Update 동작 또는 전체 대화 dialog action/instant-copy가 실행된 뒤 Obsidian 저장이 실패하면 링크가 계속 활성 상태일 수 있습니다. 확장 프로그램은 이를 경고하며 자동으로 공유를 해제하지 않습니다. 기존 응답 링크를 단순히 재사용하거나 복사한 것만으로는 이 지속 경고 상태에 들어가지 않습니다.
+위에 설명한 명시적 ChatGPT Share 절차들이 공개 공유 예외입니다. 이 절차는 개발자 서버나 비공개 ChatGPT API가 아니라 ChatGPT의 화면 UI와 서비스를 사용합니다. 버전 1.5.53은 required/optional permission, telemetry, 원격 note 저장소, runtime/Native payload field를 새로 추가하지 않습니다. 응답 Create/Update 동작 또는 전체 대화 dialog action/instant-copy가 실행된 뒤 Obsidian 저장이 실패하면 링크가 계속 활성 상태일 수 있습니다. 확장 프로그램은 이를 경고하며 자동으로 공유를 해제하지 않습니다. 기존 응답 링크를 단순히 재사용하거나 복사한 것만으로는 이 지속 경고 상태에 들어가지 않습니다.
 
 이 문서는 확장 프로그램의 동작을 설명합니다. Chrome, ChatGPT, Obsidian, 운영체제는 이 확장 프로그램과 별개의 네트워크 및 개인정보 동작을 가질 수 있습니다.
+
+## 분기해서 시각화 기능 (v1.5.55)
+
+**분기해서 시각화**를 누르면 선택한 답변에서 새 ChatGPT 분기를 만들고 실제 Visualize 플러그인으로 바로 위 답변의 시각화를 요청합니다. ChatGPT가 요청을 처리하므로 계정 사용량이 소모될 수 있습니다. 비공개 API 대신 ChatGPT의 분기 페이지와 입력창을 사용합니다. 공개 Share 링크를 만들거나 Vault 파일을 읽어 올리지 않으며, clipboard를 사용하거나 노트를 자동 저장하지 않습니다. 기존 저장과 Share 동의 규칙은 유지됩니다.
+
+탭 간 연결 정보는 확장 프로그램 전용 session storage에만 둡니다. 탭·대화·메시지 식별자와 경로, 답변 SHA-256, 언어·버전·토큰·진행 상태·만료 시간만 포함하며 원문을 저장하지 않습니다. 2분 후에는 실행할 수 없고 다음 동작에서 정리되며 브라우저 세션 종료나 확장 재로드 시 지워집니다. 동기화나 로그 기록은 없습니다. 기존 입력, 대상 변경, 사용자 입력, 제어 요소 누락·모호함이 있으면 중단합니다. 새 분기나 미전송 초안은 확인용으로 남을 수 있으며 자동 재전송·삭제하지 않습니다.

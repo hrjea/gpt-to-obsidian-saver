@@ -45,7 +45,7 @@ function loadHooks({ syncState = {} } = {}) {
         lastError: null,
         sendMessage: (message, callback) => callback?.(
           message?.type === "gpt2obs-runtime-ping"
-            ? { ok: true, pong: true, version: "1.5.54" }
+            ? { ok: true, pong: true, version: "1.5.62" }
             : { ok: true }
         )
       }
@@ -802,9 +802,116 @@ function makeHandleCopyFixture(hooks, {
   };
 }
 
-async function main() {
+async function testResourceRowHtmlBatch({ preReadIndex = false, mismatch = false, ambiguous = false, disappear = false, timeout = false, runtimeAbort = false, attributeDownload = false, count = 3 } = {}) {
   const hooks = loadHooks();
-  assert.strictEqual(hooks.VERSION, "1.5.54");
+  const names = ["index.html", "complete.html", ...Array.from({ length: count - 2 }, (_, index) => `chapter-${String(index + 1).padStart(2, "0")}.html`)];
+  const activated = [];
+  const watches = [];
+  let expanded = false;
+  const leaf = (label, attrs = {}) => ({
+    tagName: "BUTTON", isConnected: true, style: {}, innerText: label, textContent: label,
+    getAttribute: key => attrs[key] || "", hasAttribute: () => false,
+    querySelector: () => null, querySelectorAll: () => [], matches: () => false,
+    closest: () => null, getBoundingClientRect: () => ({ width: 100, height: 30 })
+  });
+  const references = names.map(name => leaf(name, { "data-file-reference": "true", role: "button", "data-markdown-copy-text": name }));
+  const rows = names.map(name => {
+    const open = leaf("", { "aria-label": `${name} 미리보기 열기` });
+    const download = leaf("", attributeDownload ? { download: name, href: `sandbox:/mnt/data/${name}` } : { "aria-label": "파일 다운로드" });
+    if (attributeDownload) {
+      download.tagName = "A";
+      download.hasAttribute = key => key === "download";
+    }
+    download.click = () => activated.push(name);
+    const row = { ...leaf(name), tagName: "SPAN", className: "group/resource-row relative",
+      querySelectorAll: () => [open, download] };
+    open.parentElement = row; download.parentElement = row;
+    open.closest = download.closest = selector => selector === "[class*='resource-row']" ? row : null;
+    return { name, row, open, download };
+  });
+  const more = leaf("2개 더", { "aria-controls": "synthetic-resource-list" });
+  more.getAttribute = key => key === "aria-expanded" ? String(expanded) : key === "aria-controls" ? "synthetic-resource-list" : "";
+  more.click = () => { expanded = true; };
+  const indexSource = htmlDocument("Index", "Index", "Index body", '<a href="complete.html">Complete</a>');
+  const previewRoot = { ...leaf("index.html"), querySelector: () => ({}) };
+  const frame = { ...leaf(""), parentElement: previewRoot, getAttribute: key => key === "srcdoc" ? indexSource : "" };
+  const container = {
+    innerText: names.join("\n"), textContent: names.join("\n"),
+    querySelector: () => null,
+    querySelectorAll: selector => {
+      if (selector === "a, [role='link']") return [];
+      if (selector.includes("data-file-reference")) return references;
+      if (selector === "iframe") return preReadIndex ? [frame] : [];
+      const cards = (expanded ? rows : rows.slice(0, 1)).flatMap(item => [item.open, item.download]);
+      if (selector === "button") return [...cards, ...(expanded ? [] : [more])];
+      if (selector.includes("button")) return [...references, ...cards, ...(expanded ? [] : [more])];
+      return [];
+    }
+  };
+  rows.forEach(item => { item.row.parentElement = container; });
+  if (ambiguous) {
+    const duplicate = { ...rows[1].download, click: () => { throw new Error("ambiguous download must never be activated"); } };
+    rows[1].row.querySelectorAll = () => [rows[1].open, rows[1].download, duplicate];
+  }
+  references.forEach(node => { node.parentElement = container; });
+  more.parentElement = container;
+  const saveButton = { closest: selector => selector === "[data-message-author-role]" ? container : null };
+  let activeName = "";
+  let waiting = null;
+  let cancelled = 0;
+  hooks.__sandbox.chrome.runtime.sendMessage = (message, callback) => {
+    if (message.type === "begin-html-download-watch") {
+      assert.strictEqual(message.expectedNames.length, 1, "each HTML watch must bind exactly one current file");
+      activeName = message.expectedNames[0]; watches.push(activeName);
+      if (disappear) rows.forEach(item => { item.row.isConnected = false; item.download.isConnected = false; });
+      callback({ ok: true, watchId: `watch-${watches.length}` });
+    } else if (message.type === "await-html-download-watch") {
+      assert.strictEqual(activated.at(-1), activeName, "the exact row download must be activated after its watch starts");
+      if (timeout) { waiting = callback; return; }
+      callback({ ok: true, download: { id: watches.length, name: mismatch ? "unrelated.html" : activeName.replace(/\.html$/, " (1).html"), sourcePath: `/tmp/synthetic-${watches.length}.html` } });
+    } else if (message.type === "cancel-html-download-watch") {
+      cancelled += 1;
+      waiting?.({ ok: false, error: "cancelled" });
+      waiting = null;
+      callback({ ok: true });
+    } else callback({ ok: true });
+  };
+  assert.deepStrictEqual(Array.from(hooks.collectFileLikeLinks(container), file => file.name), names,
+    "inline file-reference buttons must retain all expected HTML files before collapsed cards are revealed");
+  const runtimeGuard = runtimeAbort ? {
+    checkSync: () => ({ ok: true }),
+    check: async phase => phase === "html-download-watch-start" && activated.length
+      ? { ok: false, runtimeUnavailable: true, error: "synthetic runtime changed" } : { ok: true }
+  } : null;
+  const started = Date.now();
+  const result = await hooks.extractDownloadFiles(saveButton, [], "", { runtimeGuard, ...(timeout ? { htmlBatchTimeoutMs: 10 } : {}) });
+  assert(expanded, "the observed Korean N개 더 resource control must reveal collapsed files");
+  const expected = disappear ? [] : timeout || runtimeAbort ? [names[0]] : names.slice(0, 100).filter(name => !(preReadIndex && name === "index.html") && !(ambiguous && name === "complete.html"));
+  assert.deepStrictEqual(activated, expected, "every unambiguous remaining resource-row HTML download must be captured once");
+  assert.deepStrictEqual(Array.from(result.downloadedFiles, file => file.name), mismatch || timeout ? [] : expected,
+    "Chrome duplicate suffixes must retain the requested canonical names for sibling HTML links");
+  assert.strictEqual(result.files.length, preReadIndex ? 1 : 0, "a readable index stays page-readable while sibling files are downloaded");
+  assert.strictEqual(hooks.assessArtifactIntegrity({ fileLinks: hooks.collectFileLikeLinks(container), attachments: result.files, downloadedAttachments: result.downloadedFiles }).complete, !(mismatch || ambiguous || disappear || timeout || runtimeAbort || count > 100));
+  assert.strictEqual(!!result.runtimeUnavailable, runtimeAbort, "runtime failure must stop before the next row activation");
+  if (timeout) {
+    assert(Date.now() - started < 1000, "one shared batch deadline must stop the sequence and cancel the active watch");
+    assert.strictEqual(cancelled, 1);
+  }
+}
+
+async function main() {
+  await testResourceRowHtmlBatch();
+  await testResourceRowHtmlBatch({ preReadIndex: true, count: 41 });
+  await testResourceRowHtmlBatch({ mismatch: true });
+  await testResourceRowHtmlBatch({ ambiguous: true });
+  await testResourceRowHtmlBatch({ disappear: true });
+  await testResourceRowHtmlBatch({ runtimeAbort: true });
+  await testResourceRowHtmlBatch({ timeout: true });
+  await testResourceRowHtmlBatch({ count: 101 });
+  await testResourceRowHtmlBatch({ attributeDownload: true });
+  await testResourceRowHtmlBatch({ attributeDownload: true, ambiguous: true });
+  const hooks = loadHooks();
+  assert.strictEqual(hooks.VERSION, "1.5.62");
   const assertOrdinaryResponseSupplementalSchema = (markdown, shareUrl, label) => {
     assert.strictEqual((markdown.match(/^# (?:ChatGPT Share|ChatGPT 공유)$/gm) || []).length, 1, `${label} must contain exactly one supplemental block`);
     assert.strictEqual((markdown.match(/^chatgpt_share_url:/gm) || []).length, 1, `${label} must contain exactly one response URL field`);

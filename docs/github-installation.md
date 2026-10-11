@@ -2,14 +2,16 @@
 
 This project is distributed through GitHub Releases and installed with Chrome's Load unpacked function.
 
+Select the **v1.5.62-rc.1 prerelease** explicitly; the latest stable release remains v1.5.54. Its extension and ZIP filenames use version 1.5.62. Actual Chrome Save/Native/Vault and fresh isolated package-load verification are NOT RUN. Review the [release checklist](../RELEASE_CHECKLIST_v1.5.62.md) and published asset checksums before installing.
+
 ## Install the Extension
 
-1. Download `gpt-to-obsidian-saver-v1.5.54-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.62-unpacked-extension.zip` from the GitHub Release.
 2. Download `SHA256SUMS.txt`.
 3. Verify the checksum:
 
 ```sh
-shasum -a 256 gpt-to-obsidian-saver-v1.5.54-unpacked-extension.zip
+shasum -a 256 gpt-to-obsidian-saver-v1.5.62-unpacked-extension.zip
 ```
 
 Compare the result with `SHA256SUMS.txt`.
@@ -19,7 +21,7 @@ Compare the result with `SHA256SUMS.txt`.
 6. Enable Developer mode.
 7. Select Load unpacked.
 8. Select the unzipped folder containing `manifest.json`.
-9. Confirm the displayed version is `1.5.54`.
+9. Confirm the displayed version is `1.5.62`.
 
 Chrome may warn about developer-mode extensions because this is an unpacked GitHub installation.
 
@@ -81,6 +83,11 @@ For non-project conversations, ordinary Markdown and HTML saves require separate
 3. Confirm the Markdown note is created.
 4. Confirm the `.html` file exists in the configured attachment folder.
 5. Confirm the note link opens the HTML file.
+6. For a multi-file answer, check every expected file, including collapsed cards. Open its index and verify chapter links and distinct file contents. A readable index alone is not a complete multi-file save.
+
+## Branch & visualize
+
+The separate Branch & visualize button creates a new ChatGPT branch and submits a fixed native Visualize request. It may consume ChatGPT account usage and does not save a note automatically. Check the new branch after a stopped action; do not assume a failed confirmation means no request was sent.
 
 ## Updating
 

@@ -4,7 +4,7 @@ GPT to Obsidian Saver is local-first and user-initiated.
 
 ## What Is Processed
 
-When the user clicks Save to Obsidian, the extension reads the relevant ChatGPT message and nearby conversation context needed to build the note. It may also inspect the current assistant turn for page-readable HTML or generated detailed-Markdown artifacts and one exact current download when page extraction is unavailable.
+When the user clicks Save to Obsidian, the extension reads the relevant ChatGPT message and nearby conversation context needed to build the note. It may also inspect the current assistant turn for page-readable HTML or generated detailed-Markdown artifacts and exact current downloads when page extraction is unavailable.
 
 Conversation text is processed locally in the browser extension. The current ChatGPT page URL can be recorded in the Markdown frontmatter as the note source.
 
@@ -49,6 +49,12 @@ Data is saved locally through:
 - No sale of user data.
 - No remote upload of notes, Vault files, downloaded attachments, or logs by the extension. General settings use Chrome's sync storage and may be synchronized by Chrome according to the user's browser/account configuration.
 
-The explicit ChatGPT Share flows described above are the only current remote-sharing exception. They use ChatGPT's own visible UI and service, not a developer-operated server or private ChatGPT API. Version 1.5.53 adds no required or optional permission, telemetry, remote note store, or new runtime/Native payload field. If a response Create/Update action or a whole-conversation dialog action/instant-copy occurred and the later Obsidian save fails, the link may remain active; the extension warns the user and does not automatically revoke it. Merely reusing or copying an existing response link does not by itself enter that persistence-warning state.
+The explicit ChatGPT Share flows described above are the public-sharing exception. They use ChatGPT's own visible UI and service, not a developer-operated server or private ChatGPT API. Version 1.5.53 adds no required or optional permission, telemetry, remote note store, or new runtime/Native payload field. If a response Create/Update action or a whole-conversation dialog action/instant-copy occurred and the later Obsidian save fails, the link may remain active; the extension warns the user and does not automatically revoke it. Merely reusing or copying an existing response link does not by itself enter that persistence-warning state.
 
 This document describes the extension's behavior. Chrome, ChatGPT, Obsidian, and the operating system may have their own network and privacy behavior outside this extension.
+
+## Optional branch and Visualize action (v1.5.55)
+
+Clicking **Branch & visualize** explicitly creates a new ChatGPT branch at the selected answer and sends a fixed request to visualize the preceding answer using the native Visualize plugin. ChatGPT processes that generation and may count it toward account usage. The extension uses ChatGPT's native branch page and visible composer, not a private API. This action creates no public Share link and does not read or upload Vault files, use the clipboard or automatically save a note. Existing Save/Share consent rules continue to apply to saving.
+
+Temporary correlation is kept only in extension session storage: source/destination tab and conversation/message IDs/routes, an answer SHA-256, locale, version, token, phase and expiry. No raw answer text is stored there. Records expire after two minutes, are pruned on subsequent operations, and clear with the browser session/extension reload. No record is synced or logged. Missing controls, existing drafts, changed targets or user input stop automation; a created branch or unsent draft may remain for inspection, with no automatic resend or deletion.

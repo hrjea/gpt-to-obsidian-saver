@@ -1,6 +1,6 @@
 # GPT to Obsidian Saver
 
-Version 1.5.54 fixes HTML saving that could stop with `selected assistant changed` while the artifact viewer returned from Code to Preview. The user reports the original save succeeds. Ordinary supplemental Share and project no-Share behavior are preserved.
+Release candidate **v1.5.62-rc.1** (extension version 1.5.62) improves linked HTML attachment capture from current ChatGPT file cards and restores actions on the current message layout. It also includes Branch & visualize, which opens a new ChatGPT branch and sends a Visualize request on an explicit click. Installed Chrome saving and Native/Vault E2E are NOT RUN for this candidate; see the [release checklist](RELEASE_CHECKLIST_v1.5.62.md).
 
 [English](README.md) | [한국어](README.ko.md)
 
@@ -10,7 +10,7 @@ GPT to Obsidian Saver is a Chrome extension that saves ChatGPT answers to Obsidi
 
 ![GPT to Obsidian Saver demo](assets/demo.gif)
 
-This 15-second public-safe capture uses a temporary ChatGPT conversation and a test Obsidian vault. It shows a real HTML artifact, the Save to Obsidian action, the generated Markdown note, and the saved HTML learning material.
+This historical 15-second public-safe capture uses a temporary ChatGPT conversation and a test Obsidian vault. It shows a real HTML artifact, the Save to Obsidian action, the generated Markdown note, and the saved HTML learning material.
 
 Selected public-safe screenshots are also available in [assets/screenshots](assets/screenshots). The options-page screenshot remains pending because it must be captured without exposing a local extension ID or vault path.
 
@@ -39,11 +39,17 @@ For Q → A1 → A2 → A3, selecting A3 saves Q plus A3 only; A1/A2 are selecti
 
 Version 1.5.53 adds project-conversation saving without Share. Non-project supplemental Share and specialized remote-reference flows retain their consent, target, artifact and transport safeguards. See [the public architecture](docs/architecture.md) for the current behavior and trust boundaries.
 
+## Branch & visualize
+
+Click **Branch & visualize** beside Save to Obsidian to open a new ChatGPT branch at the selected answer and send a fixed request through the native Visualize plugin. This may count toward ChatGPT account usage. The action checks the exact inherited answer, branch and empty composer; user input, changed targets or missing/ambiguous controls stop it. It sends at most once and does not automatically save to Obsidian. A stopped branch or draft can remain for inspection.
+
+No extra permission, clipboard use or public Share link is introduced. Temporary correlation is held in extension session storage and expires after two minutes. See [Privacy](docs/privacy.md).
+
 ## Supported Platforms
 
 | Platform | Status |
 | --- | --- |
-| Chrome on macOS | Supported for URI mode and native-helper mode, with historical live validation. For 1.5.53, the original project save has a user-reported success; fresh agent-inspected Native/Vault and isolated package-load checks were not run. |
+| Chrome on macOS | Supports URI and native-helper modes, with historical live evidence. Version 1.5.62 installed Save/Native/Vault and isolated package-load checks are NOT RUN; source validation is recorded separately in the current release checklist. |
 | Chrome on Windows | URI mode should work when Obsidian URI handling works. Native-helper support is Experimental and has not been validated on a real Windows machine for this release. |
 | Linux | Obsidian URI mode may work depending on local URI handling. Native-helper mode is unsupported. |
 
@@ -51,13 +57,13 @@ Version 1.5.53 adds project-conversation saving without Share. Non-project suppl
 
 The project is currently distributed through GitHub Releases only. It is installed as an unpacked Chrome extension.
 
-The installation instructions below target v1.5.54. Verify the published release version and checksums before installation.
+The installation instructions below target the **v1.5.62-rc.1 prerelease**, whose extension and ZIP filenames use 1.5.62. The latest stable release remains v1.5.54. Select the prerelease explicitly and verify its checksums before installing.
 
 This project is not available through the Chrome Web Store. Do not expect Chrome Web Store installation, listing, review, or automatic update behavior.
 
 ## Install from GitHub Releases
 
-1. Download `gpt-to-obsidian-saver-v1.5.54-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.62-unpacked-extension.zip` from the GitHub Release.
 2. Verify the SHA-256 checksum from `SHA256SUMS.txt`.
 3. Unzip the file.
 4. Open `chrome://extensions`.
@@ -103,7 +109,7 @@ The native host allowed origin must match the actual extension ID shown by Chrom
 ### macOS Native Helper
 
 1. Copy the extension ID from `chrome://extensions`.
-2. Download and unzip `gpt-to-obsidian-saver-v1.5.54-native-host-macos.zip`.
+2. Download and unzip `gpt-to-obsidian-saver-v1.5.62-native-host-macos.zip`.
 3. Run:
 
 ```sh
@@ -151,7 +157,7 @@ For real HTML artifacts, the extension first tries to read page-accessible conte
 - fetchable iframe `blob:` sources
 - accessible preview frame documents
 
-If those fail and the user clicked Save to Obsidian on a real HTML download candidate, the `downloads` permission is used to identify the HTML file downloaded immediately after the save action. The native helper copies only that specific `.html` or `.htm` file into the configured vault attachment folder.
+When files remain, Save inventories current inline file references and resource cards, expands the selected answer's collapsed file list, and downloads each uniquely named HTML file through a bounded current-action watch. An already readable index does not prevent collecting its sibling files. The shared batch budget is 90 seconds with a 100-file bound. Missing/ambiguous controls, unrelated downloads and runtime failures do not count as complete capture. The native helper copies only verified `.html` or `.htm` files into the configured vault attachment folder and preserves sibling links using their canonical filenames.
 
 Plain text such as `options 2.html` or `example 1.html` does not create an attachment.
 

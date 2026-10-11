@@ -179,7 +179,7 @@ function buildScenarioNote(hooks, nodes, currentNode, hasRealHtmlAttachment, use
 
 const hooks = loadContentHooks();
 const backgroundHooks = loadBackgroundHooks();
-assert.strictEqual(hooks.VERSION, "1.5.54");
+assert.strictEqual(hooks.VERSION, "1.5.62");
 
 const responseShareUrl = ["https://chatgpt.com", "s", "synthetic-response-note"].join("/");
 const responseSupplement = hooks.supplementalShareMetadata({ shareUrl: responseShareUrl, shareScope: "response" });
@@ -302,6 +302,20 @@ assert.strictEqual(
 );
 
 const completeArtifactHtml = "<!doctype html>\n<html lang=\"ko\"><head><title>학습자료</title></head><body>내용</body></html>";
+const htmlWatch = {
+  ...markdownWatch,
+  kind: "html",
+  expectedNames: backgroundHooks.sanitizeExpectedDownloadNames(["chapter.html"], "html")
+};
+const htmlDownload = { ...currentMarkdownDownload, filename: "/tmp/chapter (1).html" };
+assert.strictEqual(backgroundHooks.chooseMatchingDownload([htmlDownload], htmlWatch)?.id, htmlDownload.id,
+  "an exact current HTML download must retain Chrome duplicate-suffix matching");
+assert.strictEqual(backgroundHooks.chooseMatchingDownload([{ ...htmlDownload, filename: "/tmp/previous-sibling.html" }], htmlWatch), null,
+  "a named HTML watch must reject a single recent sibling download instead of capturing the wrong linked file");
+assert.strictEqual(backgroundHooks.chooseMatchingDownload([htmlDownload], { ...htmlWatch, expectedNames: [] })?.id, htmlDownload.id,
+  "an unnamed HTML watch may retain one otherwise eligible current download");
+assert.strictEqual(backgroundHooks.chooseMatchingDownload([htmlDownload, { ...htmlDownload, id: 77, filename: "/tmp/other.html" }], { ...htmlWatch, expectedNames: [] }), null,
+  "an unnamed HTML watch must reject multiple independent candidates");
 assert.strictEqual(
   hooks.extractCompleteHtmlSource({
     querySelectorAll: () => [{ value: "", innerText: completeArtifactHtml, textContent: completeArtifactHtml }]

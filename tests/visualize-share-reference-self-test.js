@@ -45,7 +45,7 @@ function loadContentHooks() {
         lastError: null,
         sendMessage: (message, callback) => callback?.(
           message?.type === "gpt2obs-runtime-ping"
-            ? { ok: true, pong: true, version: "1.5.54" }
+            ? { ok: true, pong: true, version: "1.5.62" }
             : message?.type === "gpt2obs-native-preflight"
               ? { ok: true, pong: true, native: true }
               : { ok: true }
@@ -616,7 +616,7 @@ function makeTimerTracker() {
 
  (async () => {
 const hooks = loadContentHooks();
-assert.strictEqual(hooks.VERSION, "1.5.54");
+assert.strictEqual(hooks.VERSION, "1.5.62");
 hooks.setTestLanguage("ko");
 
 // Ordinary supplemental sharing freezes the selected Q/A pair before an

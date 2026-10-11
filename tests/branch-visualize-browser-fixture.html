@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="google" content="notranslate">
+<title>Branch Visualize DOM fixture</title>
+<style>body{font:16px sans-serif;margin:24px}#prompt-textarea{border:1px solid;padding:12px;min-height:24px}.case{padding:8px}.pass{color:green}.fail{color:red}</style>
+<h1>Branch Visualize DOM fixture</h1>
+<p>Synthetic page and mock extension transport. This does not install an extension or send a ChatGPT request.</p>
+<div id="results"></div><main id="fixture"></main>
+<script type="module">
+const results=document.querySelector('#results');
+const root=document.querySelector('#fixture');
+const sourceId='11111111-2222-4333-8444-555555555555', targetId='aaaaaaaa-2222-4333-8444-555555555555', messageId='bbbbbbbb-2222-4333-8444-555555555555';
+const origin='https://chatgpt.com', sourceUrl=origin+'/c/'+sourceId, targetUrl=origin+'/c/'+targetId;
+const locationMock={href:targetUrl};
+const hash=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))),b=>b.toString(16).padStart(2,'0')).join('');
+const code=await (await fetch('../branch-visualize.js',{cache:'no-store'})).text();
+new Function('location',code)(locationMock);
+let failures=0;
+function report(name,pass,detail='') { const div=document.createElement('div');div.className='case '+(pass?'pass':'fail');div.textContent=(pass?'PASS ':'FAIL ')+name+' '+detail;results.appendChild(div);if(!pass)failures++; }
+const scenarios=['menu','already-selected','existing-draft','wrong-answer','ambiguous-menu','draft-after-authorization','route-change','disabled-send','temporary-branch','temporary-commits-after-send','temporary-changes-before-send','canonical-changes-after-send','runtime-handoff','menu-description','text-only-lookalike'];
+for(const scenario of scenarios) {
+  locationMock.href=scenario.startsWith('temporary-')||scenario==='runtime-handoff'?origin+'/c/WEB:'+targetId:targetUrl;
+  root.replaceChildren();
+  document.querySelectorAll('[data-gpt2obs-ui="branch-status"]').forEach(n=>n.remove());
+  const answer=document.createElement('div');answer.dataset.messageAuthorRole='assistant';answer.dataset.messageId=messageId;answer.textContent='Synthetic answer for visualization.';root.append(answer);
+  const p=document.createElement('p');p.append('Branched from ');const link=document.createElement('a');link.href=sourceUrl;link.textContent='Synthetic source';p.append(link);root.append(p);
+  const form=document.createElement('form');const editor=document.createElement('div');editor.id='prompt-textarea';editor.contentEditable='true';editor.setAttribute('role','textbox');editor.innerHTML='<p><br></p>';form.append(editor);
+  const send=document.createElement('button');send.id='composer-submit-button';send.dataset.testid='send-button';send.textContent='Send';form.append(send);root.append(form);
+  if(scenario==='existing-draft')editor.textContent='User draft must remain';
+  if(scenario==='disabled-send')send.disabled=true;
+  const job={token:'synthetic-token',version:'test',messageId,fingerprint:await hash(scenario==='wrong-answer'?'Different answer.':answer.textContent),targetRoute:locationMock.href,sourceId,sourceRoute:sourceUrl,language:'ko',expires:Date.now()+120000};
+  let claimed=false,sends=0,authorizations=0;
+  globalThis.chrome={runtime:{id:'synthetic-extension',sendMessage(msg,callback){
+    if(msg.currentUrl!==locationMock.href) {callback({ok:false,stage:'route-changed',intent:true});return;}
+    if(msg.type.endsWith('claim')) {const response=claimed?{ok:true}:{ok:true,job};claimed=true;callback(response);return;}
+    if(msg.type.endsWith('authorize')) {authorizations++;if(scenario==='draft-after-authorization')editor.append(' changed');if(scenario==='temporary-changes-before-send')locationMock.href=targetUrl;callback({ok:true});return;}
+    callback({ok:false});
+  }}};
+  if(scenario==='runtime-handoff') {
+    const key='gpt2obsBranchIntents';
+    let stored=[{...job,sourceTabId:9,targetTabId:1,phase:'pending'}];
+    const api={runtime:{id:'synthetic-extension'},storage:{session:{
+      async get(){return {[key]:structuredClone(stored)};},
+      async set(value){stored=structuredClone(value[key]);}
+    }},tabs:{async get(id){return {id,url:locationMock.href};}}};
+    const handler=GPT2OBSBranchVisualize.createBackground(api,'test');
+    const originalUrl=origin+'/branch/'+sourceId+'/'+messageId;
+    locationMock.href=originalUrl;
+    chrome.runtime.sendMessage=(msg,callback)=>{
+      if(msg.type.endsWith('authorize'))authorizations++;
+      handler(msg,{id:api.runtime.id,frameId:0,tab:{id:1},url:originalUrl}).then(response=>{
+        callback(response);
+        if(response.wait)locationMock.href=origin+'/c/WEB:'+targetId;
+      });
+    };
+  }
+  function selectNative() {
+    editor.replaceChildren(document.createTextNode('바로위 답변을 '));
+    const pill=document.createElement('span');pill.dataset.inlineSelectionPill='';pill.dataset.id='plugin:visualize';pill.dataset.symbol='ecosystemMention';pill.contentEditable='false';pill.textContent='Visualize';editor.append(pill);
+    root.querySelectorAll('.__menu-item').forEach(n=>n.remove());
+  }
+  editor.addEventListener('input',()=>{
+    if(scenario==='route-change')locationMock.href=sourceUrl;
+    if(scenario==='already-selected') { selectNative();return; }
+    const menu=document.createElement('div');menu.className='__menu-item';menu.tabIndex=0;menu.setAttribute('role','option');
+    if(scenario!=='text-only-lookalike') {
+      const icon=document.createElement('div');icon.dataset.testid='plugin-icon-wrapper';
+      const img=document.createElement('img');img.src=origin+'/images/visualize/app-blocks-visualize.svg';img.alt='';icon.append(img);menu.append(icon);
+    }
+    const label=document.createElement('span');label.textContent='Visualize';menu.append(label);
+    if(scenario==='menu-description') {const description=document.createElement('span');description.textContent='Create visualizations and interactive tools';menu.append(description);}
+    menu.addEventListener('click',selectNative);root.append(menu);
+    if(scenario==='ambiguous-menu')root.append(menu.cloneNode(true));
+  },{once:true});
+  form.addEventListener('submit',event=>event.preventDefault());
+  send.addEventListener('click',event=>{event.preventDefault();sends++;const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.textContent=editor.textContent;root.insertBefore(user,p);editor.replaceChildren();if(scenario==='temporary-commits-after-send')locationMock.href=targetUrl;if(scenario==='canonical-changes-after-send')locationMock.href=sourceUrl;});
+  const content=GPT2OBSBranchVisualize.createContent('test',()=> 'ko',()=>false);
+  await content.resume();await content.resume();
+  const expected=['menu','already-selected','temporary-branch','temporary-commits-after-send','canonical-changes-after-send','runtime-handoff','menu-description'].includes(scenario)?1:0;
+  const successExpected=['menu','already-selected','temporary-branch','temporary-commits-after-send','runtime-handoff','menu-description'].includes(scenario);
+  const statusIsSuccess=document.querySelector('[data-gpt2obs-ui="branch-status"]')?.textContent==='시각화 요청 전송됨';
+  report(scenario,sends===expected && statusIsSuccess===successExpected && (scenario!=='existing-draft'||editor.textContent==='User draft must remain'),`sends=${sends}, authorizations=${authorizations}`);
+}
+// A known attempt must not disappear silently between polling and job delivery.
+for (const scenario of ['claim-denied','claim-disappeared','claim-immediate-denial','no-intent']) {
+  document.querySelectorAll('[data-gpt2obs-ui="branch-status"]').forEach(n=>n.remove());
+  root.replaceChildren();
+  let polls=0,otherMessages=0;
+  globalThis.chrome={runtime:{id:'synthetic-extension',sendMessage(msg,callback){
+    if(!msg.type.endsWith('claim')) { otherMessages++;callback({ok:false});return; }
+    polls++;
+    if(scenario==='no-intent')callback({ok:true});
+    else if(scenario==='claim-immediate-denial')callback({ok:false,stage:'route-changed',intent:true});
+    else if(polls===1)callback({ok:true,wait:true});
+    else callback(scenario==='claim-denied'?{ok:false,stage:'route-changed'}:{ok:true});
+  }}};
+  const content=GPT2OBSBranchVisualize.createContent('test',()=> 'ko',()=>false);
+  await content.resume();await content.resume();
+  const notice=document.querySelector('[data-gpt2obs-ui="branch-status"]')?.textContent||'';
+  report(scenario,otherMessages===0 && polls===(['no-intent','claim-immediate-denial'].includes(scenario)?1:2) &&
+    (scenario==='no-intent'?!notice:notice.includes('중단')));
+}
+// Check the real save converter with the new adjacent button present.
+root.replaceChildren();
+const msg=document.createElement('div');msg.dataset.messageAuthorRole='assistant';msg.dataset.messageId=messageId;msg.innerHTML='<div class="markdown"><p>Synthetic saved answer.</p></div>';root.append(msg);
+globalThis.__GPT_OBSIDIAN_ENABLE_TEST_HOOKS__=true;
+chrome.storage={sync:{get(_k,cb){setTimeout(()=>cb({uiLanguage:'ko'}),0);}},local:{get(_k,cb){cb({htmlSaveDirMigratedFromSync:true});}},onChanged:{addListener(){}}};
+chrome.runtime.sendMessage=(_msg,cb)=>cb({ok:true});
+new Function('location',await (await fetch('../content.js',{cache:'no-store'})).text())(locationMock);
+await new Promise(r=>setTimeout(r,30));
+const save=msg.querySelector('.gpt2obs-btn');
+const branch=msg.querySelector('.gpt2obs-visualize-btn');
+const hooks=__GPT_OBSIDIAN_TEST_HOOKS__;
+const markdown=hooks.htmlToMarkdown(hooks.extractAssistantMessageHTML(save));
+report('adjacent button',!!save && save.nextElementSibling===branch);
+report('locale changes update adjacent button',branch?.textContent==='분기해서 시각화');
+report('save excludes action chrome',markdown.includes('Synthetic saved answer.')&&!markdown.includes('시각화')&&!markdown.includes('Branch & visualize')&&!markdown.includes('Obsidian'));
+const before=msg.querySelectorAll('.gpt2obs-visualize-btn').length;
+root.append(document.createElement('span'));await new Promise(r=>setTimeout(r,30));
+report('idempotent injection',before===1 && msg.querySelectorAll('.gpt2obs-visualize-btn').length===1);
+document.title=failures?`FAIL ${failures} Branch Visualize DOM`:'PASS Branch Visualize DOM';
+document.body.dataset.testResult=failures?'FAIL':'PASS';
+</script>
