@@ -1,15 +1,25 @@
 # Changelog
 
+## [1.5.63-rc.1] - Unreleased
+
+Candidate only; extension version and planned asset filenames use 1.5.63. The latest stable release remains v1.5.54.
+
+- Correct the cumulative 90-second HTML batch cutoff observed in v1.5.62: the installed save captured 24 of 41 expected HTML files, while the next file completed after the note was written.
+- Renew a 90-second progress allowance only on receipt of a verified matching file, subject to an absolute ten-minute batch limit and the existing 100-file bound. Wrong-name, missing and ambiguous files do not renew the deadline.
+- Bound watch setup, download wait and cleanup. A timeout or unconfirmed cleanup stops the sequence; late watch IDs are cancelled and late completions cannot resume it. Cleanup latency never extends the verified receipt deadline.
+- Retain filename/trust/runtime checks, explicit partial-save consent and existing Share/Native/Vault boundaries. Timing regressions include healthy 41-file batches, stalls, the total cap, wrong names, runtime loss, delayed setup/cleanup and declined partial saves in project and non-project routes.
+- Automated source validation passes. After reload, the original project Save passed actual Native/Vault output inspection: 41 distinct HTML files and the note body, with valid local file/fragment links. The run included assistance at the Markdown-download prompt and explicit consent to omit ZIP, detailed Markdown (.md) and mind-map (.mm) files; it is not an all-format save result. Non-project Share checks and fresh isolated package load remain NOT RUN. Packaging and publication are also NOT RUN; see the [release checklist](RELEASE_CHECKLIST_v1.5.63.md).
+
 ## [1.5.62-rc.1] - 2026-10-11
 
-Prerelease candidate; extension version and asset filenames use 1.5.62. Stable publication remains blocked on the current live/manual gates.
+Published prerelease; extension version and asset filenames use 1.5.62. A later installed save FAILED with 24 of 41 expected HTML files. Do not treat this release as verified for complete multi-file capture; stable promotion remains blocked.
 
 - Capture linked HTML files from current inline file references, resource cards and collapsed file lists, including remaining files when an index was already readable. Preserve canonical filenames across Chrome duplicate suffixes for sibling-link rewriting.
 - Keep each download bounded to the exact current filename/control, with a shared 90-second batch budget and 100-file bound. Unrelated or ambiguous downloads and runtime failures remain incomplete; existing partial-save consent, Share rules and Native/Vault boundaries remain intact.
 - Restore Save and adjacent actions on the current search-unit message layout while rejecting role, identity and toolbar ambiguity.
 - Include Branch & visualize, added since v1.5.54: an explicit click opens a native ChatGPT branch at the selected answer and sends one fixed native Visualize request. It checks the source, destination, empty draft and selected plugin; no additional permissions, clipboard access or automatic Obsidian save is added. Requests may count toward ChatGPT usage.
 - Include branch startup/handoff, temporary-draft transition and Visualize-menu compatibility fixes. Changed targets, user drafts, interruptions and uncertain sends remain fail-closed without automatic resend.
-- Installed v1.5.62 Chrome Save/Native/Vault E2E and fresh isolated package load are NOT RUN. Source validation, packaging and publication are tracked separately in [the release checklist](RELEASE_CHECKLIST_v1.5.62.md).
+- Installed v1.5.62 multi-file HTML saving FAILED after publication; fresh isolated package load and broader live checks remain NOT RUN. The [historical release checklist](RELEASE_CHECKLIST_v1.5.62.md) records the earlier candidate state and subsequent failure.
 
 ## [1.5.54] - 2026-09-08
 

@@ -1,6 +1,6 @@
 # GPT to Obsidian Saver
 
-사전릴리스 후보 **v1.5.62-rc.1**(확장 프로그램 버전 1.5.62)은 현재 ChatGPT 파일 카드의 연결된 HTML 첨부 수집과 메시지 화면의 저장 버튼 호환성을 개선합니다. 명시적으로 클릭하면 새 ChatGPT 분기에서 Visualize 요청을 전송하는 ‘분기해서 시각화’ 기능도 포함합니다. 이번 후보의 실제 Chrome 저장·Native/Vault E2E 검증은 아직 NOT RUN입니다. [릴리스 체크리스트](RELEASE_CHECKLIST_v1.5.62.md)를 참고하세요.
+아직 공개되지 않은 **v1.5.63-rc.1 후보**(확장 프로그램 버전 1.5.63)는 v1.5.62에서 예상 HTML 41개 중 24개만 저장된 누적 다운로드 시간제한 문제를 수정합니다. 정상 다운로드는 계속 진행하되 개별 대기와 전체 작업의 상한을 유지합니다. 자동검증과 원래 프로젝트 답변의 실제 저장 파일 검사는 PASS입니다. HTML 41개와 노트 본문을 저장했고 내부 링크가 모두 유효했습니다. 이 검증에는 Markdown 다운로드 안내에서의 수동 지원과 ZIP·상세 Markdown(.md)·마인드맵(.mm) 제외에 대한 명시적 동의가 있었습니다. 비프로젝트 Share 검사와 격리 패키지 로드는 NOT RUN입니다. [릴리스 체크리스트](RELEASE_CHECKLIST_v1.5.63.md)를 참고하세요.
 
 [English](README.md) | [한국어](README.ko.md)
 
@@ -49,7 +49,7 @@ Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 
 
 | 플랫폼 | 상태 |
 | --- | --- |
-| Chrome on macOS | URI/native-helper mode를 지원하며 이전 버전의 실제 검증 기록이 있습니다. 1.5.62 실제 저장·Native/Vault 및 격리 패키지 로드는 NOT RUN이며 소스 검증은 현재 릴리스 체크리스트에 별도로 기록합니다. |
+| Chrome on macOS | URI/native-helper mode를 지원하며 이전 버전의 실제 검증 기록이 있습니다. 1.5.63의 원래 프로젝트 HTML 저장·Native/Vault 시나리오는 위의 수동 지원과 명시적 제외 범위에서 PASS입니다. 비프로젝트 Share 검사와 격리 패키지 로드는 NOT RUN입니다. |
 | Chrome on Windows | Obsidian URI 처리가 동작하면 URI mode는 사용할 수 있습니다. Native-helper support는 Experimental이며 이번 릴리스에서 실제 Windows 환경 검증은 하지 않았습니다. |
 | Linux | 로컬 URI 처리 상태에 따라 URI mode는 동작할 수 있습니다. Native-helper mode는 지원하지 않습니다. |
 
@@ -57,13 +57,13 @@ Q → A1 → A2 → A3에서 A3를 선택하면 현재 Q/A 본문은 Q와 A3만 
 
 현재 이 프로젝트는 GitHub Releases를 통해서만 배포되며, Chrome의 Load unpacked 기능으로 설치합니다.
 
-아래 안내는 **v1.5.62-rc.1 사전릴리스**를 대상으로 하며, 확장 프로그램 및 ZIP 파일명은 1.5.62를 사용합니다. 최신 정식 릴리스는 v1.5.54로 유지합니다. 사전릴리스를 직접 선택하고 설치 전에 checksum을 확인하세요.
+아래 안내는 아직 공개되지 않은 **v1.5.63-rc.1 사전릴리스 후보**를 대상으로 하며, 확장 프로그램 및 ZIP 파일명은 1.5.63을 사용합니다. 최신 정식 릴리스는 v1.5.54로 유지합니다. 공개된 v1.5.62-rc.1에는 위의 다중 파일 시간제한 문제가 있습니다. 새 사전릴리스가 공개된 뒤 직접 선택하고 설치 전에 checksum을 확인하세요.
 
 Chrome Web Store에서는 제공되지 않습니다. Chrome Web Store 설치, listing, review, 자동 업데이트 동작을 기대하면 안 됩니다.
 
 ## GitHub Releases에서 설치
 
-1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.62-unpacked-extension.zip`을 다운로드합니다.
+1. GitHub Release에서 `gpt-to-obsidian-saver-v1.5.63-unpacked-extension.zip`을 다운로드합니다.
 2. `SHA256SUMS.txt`로 SHA-256 checksum을 확인합니다.
 3. ZIP 파일을 압축 해제합니다.
 4. `chrome://extensions`를 엽니다.
@@ -109,7 +109,7 @@ Native host의 allowed origin은 Chrome에 표시되는 실제 extension ID와 �
 ### macOS Native Helper
 
 1. `chrome://extensions`에서 extension ID를 복사합니다.
-2. `gpt-to-obsidian-saver-v1.5.62-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
+2. `gpt-to-obsidian-saver-v1.5.63-native-host-macos.zip`을 다운로드하고 압축 해제합니다.
 3. 다음을 실행합니다.
 
 ```sh
@@ -161,7 +161,7 @@ PowerShell:
 
 `options 2.html` 또는 `example 1.html` 같은 일반 텍스트는 첨부파일을 만들지 않습니다.
 
-현재 inline 파일 참조와 resource 카드, 접힌 파일 목록에서 예상 HTML 파일을 확인합니다. index를 먼저 읽었더라도 나머지 파일을 각각 정확한 이름의 제한된 다운로드로 수집합니다. 전체 HTML 다운로드 예산은 90초, 최대 100개이며, 이름 불일치·모호한 버튼·확장 연결 오류는 완료로 처리하지 않습니다. Chrome이 중복 파일명 접미사를 붙여도 원래 파일명을 유지해 형제 HTML 링크를 연결합니다.
+현재 inline 파일 참조와 resource 카드, 접힌 파일 목록에서 예상 HTML 파일을 확인합니다. index를 먼저 읽었더라도 나머지 파일을 각각 정확한 이름의 제한된 다운로드로 수집합니다. 이름이 일치하는 다운로드를 확인할 때마다 90초 진행 대기를 갱신하며, 전체 작업은 최대 10분·100개로 제한합니다. 감시 시작·다운로드·정리에 남은 시간을 적용하고, 시간 초과나 확인되지 않은 정리 응답이 있으면 중단합니다. 이름 불일치·파일 누락·모호한 버튼은 시간을 갱신하지 않으며, 정리 지연이나 늦은 응답으로 수집을 연장·재개하지 않습니다. 확장 연결 오류도 완료로 처리하지 않습니다. Chrome이 중복 파일명 접미사를 붙여도 원래 파일명을 유지해 형제 HTML 링크를 연결합니다.
 
 ## HTML 학습자료 노트
 

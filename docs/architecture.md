@@ -1,6 +1,6 @@
 # Architecture
 
-Status: public architecture overview for version v1.5.62. Validation and release delivery are recorded separately in [the release checklist](../RELEASE_CHECKLIST_v1.5.62.md).
+Status: public architecture overview for version v1.5.63. Validation and release delivery are recorded separately in [the release checklist](../RELEASE_CHECKLIST_v1.5.63.md).
 
 ## System context
 
@@ -103,7 +103,7 @@ This supplemental Share flow applies to non-project conversations.
 
 1. Content script inventories visible file and rich-artifact expectations; project saves retain initial expectations and match rich content to the actual selected current/previous-Q&A body.
 2. It reads page-accessible HTML or a unique detailed Markdown viewer when possible. After this attempt opens HTML Code, it waits for bounded, uniquely scoped Preview restoration before ordinary Share proof. Unconfirmed restoration stops ordinary saving; genuine answer changes still fail the original proof. Already-open Code views and project local guards are preserved.
-3. Current inline file references and resource rows remain expected-file evidence. The selected answer's collapsed list is expanded when needed. Every remaining HTML name, including siblings of an already readable index, uses its own exact-current download watch followed by the unique current download control; a user click prompt remains available when automatic activation does not produce the download. The shared HTML batch deadline is 90 seconds and the name bound is 100. Runtime loss, wrong names and missing/ambiguous controls remain incomplete. Canonical row names are retained when Chrome adds duplicate suffixes so Native can rewrite sibling links.
+3. Current inline file references and resource rows remain expected-file evidence. The selected answer's collapsed list is expanded when needed. Every remaining HTML name, including siblings of an already readable index, uses its own exact-current download watch followed by the unique current download control; a user click prompt remains available when automatic activation does not produce the download. A verified matching download receipt renews a 90-second progress deadline, bounded by an absolute ten-minute batch deadline and 100 names. Setup, download wait and cleanup all use the remaining deadline. Timeout or an unconfirmed cleanup response stops the sequence; late setup IDs are cancelled without activating a control. Missing, ambiguous and mismatched files never renew progress, and cleanup time does not shift the receipt timestamp. Runtime loss, wrong names and missing/ambiguous controls remain incomplete. Canonical row names are retained when Chrome adds duplicate suffixes so Native can rewrite sibling links.
 4. It compares expected and captured deliverables.
 5. Missing content cancels by default; supported partial capture requires explicit consent.
 6. Runtime checks complete before the final save; Native-only artifact flows require the configured Vault path/helper and Native preflight. Non-project ordinary artifacts then require one consented, validated supplemental Share link; project artifacts omit that stage.

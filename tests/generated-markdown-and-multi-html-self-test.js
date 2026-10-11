@@ -45,7 +45,7 @@ function loadHooks({ syncState = {} } = {}) {
         lastError: null,
         sendMessage: (message, callback) => callback?.(
           message?.type === "gpt2obs-runtime-ping"
-            ? { ok: true, pong: true, version: "1.5.62" }
+            ? { ok: true, pong: true, version: "1.5.63" }
             : { ok: true }
         )
       }
@@ -802,8 +802,55 @@ function makeHandleCopyFixture(hooks, {
   };
 }
 
-async function testResourceRowHtmlBatch({ preReadIndex = false, mismatch = false, ambiguous = false, disappear = false, timeout = false, runtimeAbort = false, attributeDownload = false, count = 3 } = {}) {
+function installArtifactTestClock(sandbox) {
+  let now = 0;
+  let nextId = 1;
+  const timers = new Map();
+  sandbox.Date = class extends Date { static now() { return now; } };
+  sandbox.setTimeout = (callback, delay = 0) => {
+    const id = nextId++;
+    timers.set(id, { callback, due: now + Math.max(0, Number(delay) || 0) });
+    return id;
+  };
+  sandbox.clearTimeout = id => timers.delete(id);
+  const flushMicrotasks = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
+  const nextTimer = () => Array.from(timers.entries()).sort((a, b) => a[1].due - b[1].due || a[0] - b[0])[0];
+  const runTimer = entry => {
+    timers.delete(entry[0]);
+    now = entry[1].due;
+    entry[1].callback();
+  };
+  return {
+    now: () => now,
+    setTimeout: sandbox.setTimeout,
+    async settle(operation) {
+      let settled = false, value, error;
+      Promise.resolve(operation).then(result => { value = result; settled = true; }, failure => { error = failure; settled = true; });
+      for (let i = 0; i < 20000; i++) {
+        await flushMicrotasks();
+        if (settled) { if (error) throw error; return value; }
+        const next = nextTimer();
+        assert(next, "timed artifact fixture must not leave an unresolved operation without a timer");
+        runTimer(next);
+      }
+      throw new Error("timed artifact fixture exceeded its finite timer budget");
+    },
+    async advanceBy(duration) {
+      const until = now + duration;
+      for (let i = 0; i < 20000; i++) {
+        await flushMicrotasks();
+        const next = nextTimer();
+        if (!next || next[1].due > until) { now = until; return; }
+        runTimer(next);
+      }
+      throw new Error("late artifact fixture exceeded its finite timer budget");
+    }
+  };
+}
+
+async function testResourceRowHtmlBatch({ preReadIndex = false, mismatch = false, ambiguous = false, disappear = false, timeout = false, runtimeAbort = false, attributeDownload = false, count = 3, timeline = null } = {}) {
   const hooks = loadHooks();
+  const clock = timeline ? installArtifactTestClock(hooks.__sandbox) : null;
   const names = ["index.html", "complete.html", ...Array.from({ length: count - 2 }, (_, index) => `chapter-${String(index + 1).padStart(2, "0")}.html`)];
   const activated = [];
   const watches = [];
@@ -864,42 +911,117 @@ async function testResourceRowHtmlBatch({ preReadIndex = false, mismatch = false
       assert.strictEqual(message.expectedNames.length, 1, "each HTML watch must bind exactly one current file");
       activeName = message.expectedNames[0]; watches.push(activeName);
       if (disappear) rows.forEach(item => { item.row.isConnected = false; item.download.isConnected = false; });
-      callback({ ok: true, watchId: `watch-${watches.length}` });
+      const response = { ok: true, watchId: `watch-${watches.length}` };
+      if (clock && timeline.beginDelayMs) clock.setTimeout(() => callback(response), timeline.beginDelayMs);
+      else callback(response);
     } else if (message.type === "await-html-download-watch") {
       assert.strictEqual(activated.at(-1), activeName, "the exact row download must be activated after its watch starts");
       if (timeout) { waiting = callback; return; }
-      callback({ ok: true, download: { id: watches.length, name: mismatch ? "unrelated.html" : activeName.replace(/\.html$/, " (1).html"), sourcePath: `/tmp/synthetic-${watches.length}.html` } });
+      const watchNumber = watches.length;
+      const wrongName = mismatch || timeline?.mismatchAt?.includes(watchNumber);
+      const response = { ok: true, download: { id: watchNumber, name: wrongName ? "unrelated.html" : activeName.replace(/\.html$/, " (1).html"), sourcePath: `/tmp/synthetic-${watchNumber}.html` } };
+      if (clock) {
+        waiting = callback;
+        clock.setTimeout(() => callback(response), timeline.delaysMs?.[watchNumber - 1] ?? timeline.delayMs ?? 4000);
+      } else callback(response);
     } else if (message.type === "cancel-html-download-watch") {
       cancelled += 1;
       waiting?.({ ok: false, error: "cancelled" });
       waiting = null;
-      callback({ ok: true });
+      if (clock && timeline.cancelDelayMs) clock.setTimeout(() => callback({ ok: true }), timeline.cancelDelayMs);
+      else callback({ ok: true });
     } else callback({ ok: true });
   };
   assert.deepStrictEqual(Array.from(hooks.collectFileLikeLinks(container), file => file.name), names,
     "inline file-reference buttons must retain all expected HTML files before collapsed cards are revealed");
-  const runtimeGuard = runtimeAbort ? {
+  const runtimeGuard = runtimeAbort || timeline ? {
     checkSync: () => ({ ok: true }),
-    check: async phase => phase === "html-download-watch-start" && activated.length
+    check: async phase => (runtimeAbort && phase === "html-download-watch-start" && activated.length) ||
+      (timeline?.runtimeAtMs && clock.now() >= timeline.runtimeAtMs)
       ? { ok: false, runtimeUnavailable: true, error: "synthetic runtime changed" } : { ok: true }
   } : null;
   const started = Date.now();
-  const result = await hooks.extractDownloadFiles(saveButton, [], "", { runtimeGuard, ...(timeout ? { htmlBatchTimeoutMs: 10 } : {}) });
+  const operation = hooks.extractDownloadFiles(saveButton, [], "", { runtimeGuard, ...(timeout ? { htmlBatchTimeoutMs: 10 } : {}) });
+  const result = clock ? await clock.settle(operation) : await operation;
   assert(expanded, "the observed Korean N개 더 resource control must reveal collapsed files");
-  const expected = disappear ? [] : timeout || runtimeAbort ? [names[0]] : names.slice(0, 100).filter(name => !(preReadIndex && name === "index.html") && !(ambiguous && name === "complete.html"));
+  if (timeline) {
+    assert.strictEqual(result.downloadedFiles.length, timeline.capturedCount, timeline.label);
+    assert(clock.now() <= timeline.maxElapsedMs, "a stalled file or total batch cap must not become an unbounded wait");
+    if (timeline.minElapsedMs) assert(clock.now() >= timeline.minElapsedMs, "successful downloads must spend their modeled real completion time");
+    if (timeline.failureReason) assert(result.failures.some(failure => failure.reason === timeline.failureReason), "the timed failure must identify its actual boundary");
+    const completedNames = Array.from(result.downloadedFiles, file => file.name);
+    const activatedBeforeLate = activated.slice();
+    await clock.advanceBy(200000);
+    assert.strictEqual(cancelled, watches.length, "every begun timed watch, including a late watch ID, must be cancelled exactly once");
+    assert.deepStrictEqual(activated, activatedBeforeLate, "a late completion after cancellation must not activate another file");
+    assert.deepStrictEqual(Array.from(result.downloadedFiles, file => file.name), completedNames, "a late completion must not enter the returned attachment set");
+  }
+  const expected = timeline ? names.slice(0, timeline.activatedCount) : disappear ? [] : timeout || runtimeAbort ? [names[0]] : names.slice(0, 100).filter(name => !(preReadIndex && name === "index.html") && !(ambiguous && name === "complete.html"));
   assert.deepStrictEqual(activated, expected, "every unambiguous remaining resource-row HTML download must be captured once");
-  assert.deepStrictEqual(Array.from(result.downloadedFiles, file => file.name), mismatch || timeout ? [] : expected,
+  assert.deepStrictEqual(Array.from(result.downloadedFiles, file => file.name), timeline ? names.slice(0, timeline.capturedCount) : mismatch || timeout ? [] : expected,
     "Chrome duplicate suffixes must retain the requested canonical names for sibling HTML links");
   assert.strictEqual(result.files.length, preReadIndex ? 1 : 0, "a readable index stays page-readable while sibling files are downloaded");
-  assert.strictEqual(hooks.assessArtifactIntegrity({ fileLinks: hooks.collectFileLikeLinks(container), attachments: result.files, downloadedAttachments: result.downloadedFiles }).complete, !(mismatch || ambiguous || disappear || timeout || runtimeAbort || count > 100));
-  assert.strictEqual(!!result.runtimeUnavailable, runtimeAbort, "runtime failure must stop before the next row activation");
+  const integrity = hooks.assessArtifactIntegrity({ fileLinks: hooks.collectFileLikeLinks(container), attachments: result.files, downloadedAttachments: result.downloadedFiles });
+  assert.strictEqual(integrity.complete, timeline ? timeline.capturedCount === count : !(mismatch || ambiguous || disappear || timeout || runtimeAbort || count > 100));
+  if (timeline && !integrity.complete) {
+    assert.strictEqual(integrity.expectedHtmlNames.length, count, "timed batches must preserve every expected filename");
+    assert.strictEqual(integrity.missingNames.length, count - timeline.capturedCount);
+    assert.strictEqual(hooks.confirmIncompleteCaptureSave({ complete: false, files: integrity }, () => false), false, "timeout must retain the existing explicit partial-save decision");
+  }
+  assert.strictEqual(!!result.runtimeUnavailable, runtimeAbort || !!timeline?.runtimeAtMs, "runtime failure must stop before the next row activation");
   if (timeout) {
     assert(Date.now() - started < 1000, "one shared batch deadline must stop the sequence and cancel the active watch");
     assert.strictEqual(cancelled, 1);
   }
+  return result;
 }
 
 async function main() {
+  await testResourceRowHtmlBatch({ count: 41, timeline: {
+    label: "41 healthy sequential HTML downloads must not be cut off by cumulative 90-second latency",
+    delayMs: 4000, capturedCount: 41, activatedCount: 41, minElapsedMs: 164000, maxElapsedMs: 165000
+  } });
+  await testResourceRowHtmlBatch({ count: 41, timeline: {
+    label: "a healthy file completing after the old shared deadline must keep its remaining siblings",
+    delaysMs: [...Array(24).fill(3600), 7800], delayMs: 3600,
+    capturedCount: 41, activatedCount: 41, minElapsedMs: 150000, maxElapsedMs: 153000
+  } });
+  const timedIncompleteBatch = await testResourceRowHtmlBatch({ count: 5, timeline: {
+    label: "a stalled file must stop the batch after one bounded file wait",
+    delaysMs: [4000, 4000, 120000], capturedCount: 2, activatedCount: 3,
+    minElapsedMs: 98000, maxElapsedMs: 99000, failureReason: "HTML file download deadline exceeded"
+  } });
+  await testResourceRowHtmlBatch({ count: 41, timeline: {
+    label: "ongoing progress must never extend the batch beyond its absolute ten-minute cap",
+    delayMs: 21000, capturedCount: 28, activatedCount: 29,
+    minElapsedMs: 600000, maxElapsedMs: 601000, failureReason: "HTML batch download deadline exceeded"
+  } });
+  await testResourceRowHtmlBatch({ count: 8, timeline: {
+    label: "wrong-name downloads must not renew the last verified progress deadline",
+    delaysMs: [4000, 4000, 20000, 20000, 20000, 120000], mismatchAt: [3, 4, 5],
+    capturedCount: 2, activatedCount: 6, minElapsedMs: 98000, maxElapsedMs: 99000,
+    failureReason: "HTML file download deadline exceeded"
+  } });
+  await testResourceRowHtmlBatch({ count: 5, timeline: {
+    label: "runtime loss during a pending download must cancel it before any next activation",
+    delaysMs: [4000, 120000], runtimeAtMs: 6000, capturedCount: 1, activatedCount: 2,
+    minElapsedMs: 6000, maxElapsedMs: 7000
+  } });
+  await testResourceRowHtmlBatch({ count: 5, timeline: {
+    label: "late watch setup must stop before activation and cancel its eventual watch ID",
+    beginDelayMs: 120000, capturedCount: 0, activatedCount: 0,
+    minElapsedMs: 90000, maxElapsedMs: 91000, failureReason: "HTML file download deadline exceeded"
+  } });
+  await testResourceRowHtmlBatch({ count: 5, timeline: {
+    label: "uncertain watch cleanup must stop before another file is activated",
+    cancelDelayMs: 120000, capturedCount: 1, activatedCount: 1,
+    minElapsedMs: 90000, maxElapsedMs: 91000, failureReason: "HTML download watch cleanup deadline exceeded"
+  } });
+  await testResourceRowHtmlBatch({ count: 5, timeline: {
+    label: "watch cleanup time must not renew the last verified download receipt deadline",
+    delaysMs: [4000, 12000], cancelDelayMs: 80000, capturedCount: 1, activatedCount: 2,
+    minElapsedMs: 94000, maxElapsedMs: 95000, failureReason: "HTML file download deadline exceeded"
+  } });
   await testResourceRowHtmlBatch();
   await testResourceRowHtmlBatch({ preReadIndex: true, count: 41 });
   await testResourceRowHtmlBatch({ mismatch: true });
@@ -911,7 +1033,7 @@ async function main() {
   await testResourceRowHtmlBatch({ attributeDownload: true });
   await testResourceRowHtmlBatch({ attributeDownload: true, ambiguous: true });
   const hooks = loadHooks();
-  assert.strictEqual(hooks.VERSION, "1.5.62");
+  assert.strictEqual(hooks.VERSION, "1.5.63");
   const assertOrdinaryResponseSupplementalSchema = (markdown, shareUrl, label) => {
     assert.strictEqual((markdown.match(/^# (?:ChatGPT Share|ChatGPT 공유)$/gm) || []).length, 1, `${label} must contain exactly one supplemental block`);
     assert.strictEqual((markdown.match(/^chatgpt_share_url:/gm) || []).length, 1, `${label} must contain exactly one response URL field`);
@@ -1305,6 +1427,22 @@ async function main() {
       "rich_artifacts_remote_referenced:", "offline_available:"
     ].forEach(fragment => assert(!markdown.includes(fragment), `project local note must omit ${fragment}`));
   };
+
+  for (const project of [false, true]) {
+    const fixture = makeHandleCopyFixture(hooks, { rich: false });
+    try {
+      if (project) setProjectRoute();
+      await fixture.run({ extractDownloadFilesFn: async () => timedIncompleteBatch });
+      assert.strictEqual(fixture.events.confirms, 1, "timed-out HTML extraction must reach explicit partial consent in either save route");
+      assert.strictEqual(fixture.events.saves.length, 0, "declining a timed-out HTML batch must perform zero Native writes");
+      assert.strictEqual(fixture.events.opens.length, 0, "declining a timed-out HTML batch must perform zero URI writes");
+      assert.strictEqual(fixture.events.shareConsents, 0, "declining a timed-out HTML batch must stop before Share consent");
+      assert.strictEqual(fixture.events.permissions, 0);
+      assert.strictEqual(fixture.events.shares.length, 0);
+    } finally {
+      fixture.restore();
+    }
+  }
 
   {
     const fixture = makeHandleCopyFixture(hooks, {

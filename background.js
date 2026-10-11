@@ -1,5 +1,5 @@
 // background.js (service worker)
-const VERSION = "1.5.62";
+const VERSION = "1.5.63";
 if (typeof importScripts === "function") importScripts("branch-visualize.js");
 const branchVisualizeMessage = globalThis.GPT2OBSBranchVisualize?.createBackground(chrome, VERSION);
 const RUNTIME_PING_TYPE = "gpt2obs-runtime-ping";

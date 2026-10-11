@@ -1,6 +1,6 @@
 # GPT to Obsidian Saver
 
-Release candidate **v1.5.62-rc.1** (extension version 1.5.62) improves linked HTML attachment capture from current ChatGPT file cards and restores actions on the current message layout. It also includes Branch & visualize, which opens a new ChatGPT branch and sends a Visualize request on an explicit click. Installed Chrome saving and Native/Vault E2E are NOT RUN for this candidate; see the [release checklist](RELEASE_CHECKLIST_v1.5.62.md).
+The unpublished **v1.5.63-rc.1 candidate** (extension version 1.5.63) fixes the cumulative HTML download deadline that interrupted a v1.5.62 save after 24 of 41 expected files. Healthy downloads can continue while each wait and the whole batch remain bounded. Automated tests pass. The original project scenario also passed actual note/attachment inspection: all 41 HTML files and the note body were saved, with valid local links. This run included assistance at the Markdown-download prompt and explicit consent to omit ZIP, detailed Markdown (.md) and mind-map (.mm) files. Non-project Share checks and fresh isolated package load remain NOT RUN. See the [release checklist](RELEASE_CHECKLIST_v1.5.63.md).
 
 [English](README.md) | [한국어](README.ko.md)
 
@@ -49,7 +49,7 @@ No extra permission, clipboard use or public Share link is introduced. Temporary
 
 | Platform | Status |
 | --- | --- |
-| Chrome on macOS | Supports URI and native-helper modes, with historical live evidence. Version 1.5.62 installed Save/Native/Vault and isolated package-load checks are NOT RUN; source validation is recorded separately in the current release checklist. |
+| Chrome on macOS | Supports URI and native-helper modes, with historical live evidence. Version 1.5.63 original project HTML Save/Native/Vault scenario PASS with the assistance and explicit omissions described above; non-project Share and isolated package-load checks remain NOT RUN. |
 | Chrome on Windows | URI mode should work when Obsidian URI handling works. Native-helper support is Experimental and has not been validated on a real Windows machine for this release. |
 | Linux | Obsidian URI mode may work depending on local URI handling. Native-helper mode is unsupported. |
 
@@ -57,13 +57,13 @@ No extra permission, clipboard use or public Share link is introduced. Temporary
 
 The project is currently distributed through GitHub Releases only. It is installed as an unpacked Chrome extension.
 
-The installation instructions below target the **v1.5.62-rc.1 prerelease**, whose extension and ZIP filenames use 1.5.62. The latest stable release remains v1.5.54. Select the prerelease explicitly and verify its checksums before installing.
+The instructions below describe the planned **v1.5.63-rc.1 prerelease**, whose extension and ZIP filenames use 1.5.63. It is not published yet. The latest stable release remains v1.5.54; the published v1.5.62-rc.1 has the known multi-file timeout issue above. Once the new prerelease is published, select it explicitly and verify its checksums before installing.
 
 This project is not available through the Chrome Web Store. Do not expect Chrome Web Store installation, listing, review, or automatic update behavior.
 
 ## Install from GitHub Releases
 
-1. Download `gpt-to-obsidian-saver-v1.5.62-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.63-unpacked-extension.zip` from the GitHub Release.
 2. Verify the SHA-256 checksum from `SHA256SUMS.txt`.
 3. Unzip the file.
 4. Open `chrome://extensions`.
@@ -109,7 +109,7 @@ The native host allowed origin must match the actual extension ID shown by Chrom
 ### macOS Native Helper
 
 1. Copy the extension ID from `chrome://extensions`.
-2. Download and unzip `gpt-to-obsidian-saver-v1.5.62-native-host-macos.zip`.
+2. Download and unzip `gpt-to-obsidian-saver-v1.5.63-native-host-macos.zip`.
 3. Run:
 
 ```sh
@@ -157,7 +157,7 @@ For real HTML artifacts, the extension first tries to read page-accessible conte
 - fetchable iframe `blob:` sources
 - accessible preview frame documents
 
-When files remain, Save inventories current inline file references and resource cards, expands the selected answer's collapsed file list, and downloads each uniquely named HTML file through a bounded current-action watch. An already readable index does not prevent collecting its sibling files. The shared batch budget is 90 seconds with a 100-file bound. Missing/ambiguous controls, unrelated downloads and runtime failures do not count as complete capture. The native helper copies only verified `.html` or `.htm` files into the configured vault attachment folder and preserves sibling links using their canonical filenames.
+When files remain, Save inventories current inline file references and resource cards, expands the selected answer's collapsed file list, and downloads each uniquely named HTML file through a bounded current-action watch. An already readable index does not prevent collecting its sibling files. Each verified matching download renews a 90-second progress allowance, subject to an absolute ten-minute batch limit and a 100-file bound. Watch setup, download and cleanup share the remaining deadline; timeout or unconfirmed cleanup stops collection. Wrong-name, missing or ambiguous files do not renew progress. Cleanup delay does not extend the allowance, and late callbacks cannot resume collection. Missing/ambiguous controls, unrelated downloads and runtime failures do not count as complete capture. The native helper copies only verified `.html` or `.htm` files into the configured vault attachment folder and preserves sibling links using their canonical filenames.
 
 Plain text such as `options 2.html` or `example 1.html` does not create an attachment.
 

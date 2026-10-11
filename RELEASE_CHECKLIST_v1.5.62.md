@@ -2,7 +2,11 @@
 
 Date: 2026-10-11. GitHub-only prerelease candidate **v1.5.62-rc.1**. Runtime and package filenames use version 1.5.62. The latest stable release remains v1.5.54; do not create the stable v1.5.62 tag.
 
-## Candidate gates
+## Subsequent publication and known failure
+
+The v1.5.62-rc.1 prerelease was published with verified assets. A later installed Save captured only 24 of 41 expected HTML files; the next download completed after the note was written. Complete multi-file saving is therefore FAIL for that scenario. Fresh isolated package load and broader live checks remain NOT RUN. The correction is tracked in [the v1.5.63 candidate checklist](RELEASE_CHECKLIST_v1.5.63.md). The preparation entries below are retained as the prepublication snapshot; their pending packaging/publication rows describe that earlier point in time.
+
+## Historical candidate gates
 
 - Independent public validator, version coherence, privacy, exact inventory and local Markdown links: AUTOMATED PASS on 2026-10-11.
 - Every included file and dependency classified against the previous public release: PASS, all 63 paths classified and independently reviewed; no internal source records or history imported.

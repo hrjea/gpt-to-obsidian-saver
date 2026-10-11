@@ -1,7 +1,7 @@
 
-// content.js (1.5.62) — HTML→Markdown conversion for Obsidian-friendly content
+// content.js (1.5.63) — HTML→Markdown conversion for Obsidian-friendly content
 (function() {
-  const VERSION = "1.5.62";
+  const VERSION = "1.5.63";
   const STATE_KEY = "__gptToObsidianSaverState";
   const state = globalThis[STATE_KEY] || (globalThis[STATE_KEY] = {});
   state.generation = (state.generation || 0) + 1;
@@ -14,6 +14,8 @@
   const MAX_HTML_ATTACHMENT_CHARS = 700000;
   const MAX_GENERATED_MARKDOWN_CHARS = 2000000;
   const GENERATED_MARKDOWN_VIEWER_TIMEOUT_MS = 90000;
+  const HTML_DOWNLOAD_FILE_TIMEOUT_MS = 90000;
+  const HTML_DOWNLOAD_BATCH_TIMEOUT_MS = 600000;
   const GENERATED_MARKDOWN_VIEWER_POLL_MS = 150;
   const GENERATED_MARKDOWN_AMBIGUITY_STABILITY_MS = 1200;
   const RUNTIME_POLL_INTERVAL_MS = 1000;
@@ -9795,6 +9797,25 @@
 
   async function captureDownloadedHtmlFallback(fallbackCandidates, expectedNames = [], options = {}) {
     const runtimeGuard = options.runtimeGuard || null;
+    const deadlineError = options.deadlineReason || "HTML batch download deadline exceeded";
+    const deadlineFailure = () => ({ ok: false, error: deadlineError, timedOut: true });
+    const beforeDeadline = async operation => {
+      const pending = Promise.resolve(operation);
+      if (!Number.isFinite(options.deadlineAt)) return pending;
+      const remainingMs = options.deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        pending.catch(() => {});
+        return deadlineFailure();
+      }
+      let timer;
+      try {
+        return await Promise.race([pending, new Promise(resolve => {
+          timer = setTimeout(() => resolve(deadlineFailure()), remainingMs);
+        })]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
     const candidate = fallbackCandidates
       .filter(canClickDownloadCandidate)
       .filter(item => isExactDownloadControl(item.node) || hasDownloadAttribute(item.node))
@@ -9807,7 +9828,11 @@
       return { downloadedFiles, clickedFallback, failures };
     }
 
-    const runtimeStatus = await checkRuntimeGuard(runtimeGuard, "html-download-watch-start");
+    const runtimeStatus = await beforeDeadline(checkRuntimeGuard(runtimeGuard, "html-download-watch-start"));
+    if (runtimeStatus?.timedOut) {
+      failures.push({ name: candidate.name, reason: deadlineError });
+      return { downloadedFiles, clickedFallback, failures, timedOut: true };
+    }
     if (!runtimeStatus?.ok) {
       return {
         downloadedFiles,
@@ -9819,12 +9844,34 @@
     }
 
     const watchNames = options.autoActivate ? [candidate.downloadName || candidate.name] : htmlExpectedNamesForCandidate(candidate, expectedNames);
+    let abandonedStart = false;
+    let observedWatch = null;
+    let lateWatchCancelled = false;
+    const cancelLateWatch = () => {
+      if (!abandonedStart || !observedWatch?.watchId || lateWatchCancelled) return;
+      lateWatchCancelled = true;
+      // A response arriving after the deadline owns only cleanup, never a click.
+      void cancelHtmlDownloadWatch(observedWatch.watchId);
+    };
+    const watchRequest = beginHtmlDownloadWatch(watchNames).then(response => {
+      observedWatch = response;
+      cancelLateWatch();
+      return response;
+    });
     const watch = await awaitWithRuntimeGuard(
-      beginHtmlDownloadWatch(watchNames),
+      beforeDeadline(watchRequest),
       runtimeGuard,
       "html-download-watch-start",
       { intervalMs: options.runtimePollIntervalMs }
     );
+    if (watch?.timedOut || isExtensionRuntimeFailure(watch)) {
+      abandonedStart = true;
+      cancelLateWatch();
+    }
+    if (watch?.timedOut) {
+      failures.push({ name: candidate.name, reason: deadlineError });
+      return { downloadedFiles, clickedFallback, failures, timedOut: true };
+    }
     if (isExtensionRuntimeFailure(watch)) {
       runtimeGuard?.fail?.(watch, "html-download-watch-start");
       return {
@@ -9836,6 +9883,11 @@
       };
     }
     let watchId = watch?.watchId || "";
+    let cancelPromise = null;
+    const cancelCurrentWatch = () => {
+      if (!cancelPromise) cancelPromise = beforeDeadline(cancelHtmlDownloadWatch(watchId));
+      return cancelPromise;
+    };
 
     if (!watch?.ok || !watchId) {
       failures.push({ name: candidate.name, reason: watch?.error || "download watch failed to start" });
@@ -9846,9 +9898,14 @@
       return { downloadedFiles, clickedFallback, failures };
     }
 
-    const beforePrompt = await checkRuntimeGuard(runtimeGuard, "html-download-prompt");
+    const beforePrompt = await beforeDeadline(checkRuntimeGuard(runtimeGuard, "html-download-prompt"));
+    if (beforePrompt?.timedOut) {
+      await cancelCurrentWatch();
+      failures.push({ name: candidate.name, reason: deadlineError });
+      return { downloadedFiles, clickedFallback, failures, timedOut: true };
+    }
     if (!beforePrompt?.ok) {
-      try { await cancelHtmlDownloadWatch(watchId); } catch {}
+      try { await cancelCurrentWatch(); } catch {}
       return {
         downloadedFiles,
         clickedFallback,
@@ -9859,22 +9916,21 @@
     }
 
     if (Number.isFinite(options.deadlineAt) && Date.now() >= options.deadlineAt) {
-      await cancelHtmlDownloadWatch(watchId);
-      failures.push({ name: candidate.name, reason: "HTML batch download deadline exceeded" });
-      return { downloadedFiles, clickedFallback, failures };
+      await cancelCurrentWatch();
+      failures.push({ name: candidate.name, reason: deadlineError });
+      return { downloadedFiles, clickedFallback, failures, timedOut: true };
     }
 
     let currentCandidate = options.resolveCandidate ? options.resolveCandidate() : candidate;
     if (!currentCandidate || currentCandidate.name !== candidate.name ||
         (options.autoActivate && (!elementVisibilityDetails(currentCandidate.node).visible ||
           !(isExactDownloadControl(currentCandidate.node) || hasDownloadAttribute(currentCandidate.node))))) {
-      await cancelHtmlDownloadWatch(watchId);
+      const cleanup = await cancelCurrentWatch();
       failures.push({ name: candidate.name, reason: "exact HTML download control is missing or ambiguous" });
-      return { downloadedFiles, clickedFallback, failures };
+      return { downloadedFiles, clickedFallback, failures, stopBatch: !cleanup?.ok };
     }
     let restore = () => {};
     let promptTimer = 0;
-    let deadlineTimer = 0;
     const prompt = () => {
       const promptRuntime = runtimeGuard?.checkSync?.("html-download-prompt") || { ok: true };
       if (!promptRuntime.ok) return;
@@ -9887,9 +9943,9 @@
     if (options.autoActivate) {
       const activation = clickArtifactControl(currentCandidate.node);
       if (!activation.attempted || activation.error) {
-        await cancelHtmlDownloadWatch(watchId);
+        const cleanup = await cancelCurrentWatch();
         failures.push({ name: candidate.name, reason: activation.error || "HTML download activation failed" });
-        return { downloadedFiles, clickedFallback, failures };
+        return { downloadedFiles, clickedFallback, failures, stopBatch: !cleanup?.ok };
       }
       promptTimer = setTimeout(prompt, MARKDOWN_DOWNLOAD_PROMPT_DELAY_MS);
     } else {
@@ -9903,24 +9959,24 @@
     });
 
     let result;
+    let resultReceivedAt = 0;
+    let cleanupResult = null;
     try {
-      const pending = awaitWithRuntimeGuard(
-        awaitHtmlDownloadWatch(watchId),
+      result = await awaitWithRuntimeGuard(
+        beforeDeadline(awaitHtmlDownloadWatch(watchId)),
         runtimeGuard,
         "html-download-watch-wait",
-        { onRuntimeFailure: () => cancelHtmlDownloadWatch(watchId) }
+        { onRuntimeFailure: options.autoActivate ? undefined : cancelCurrentWatch }
       );
-      const remainingMs = Number.isFinite(options.deadlineAt) ? options.deadlineAt - Date.now() : options.timeoutMs;
-      result = Number.isFinite(remainingMs)
-        ? await Promise.race([pending, new Promise(resolve => {
-          deadlineTimer = setTimeout(() => resolve({ ok: false, error: "HTML batch download deadline exceeded" }), Math.max(1, remainingMs));
-        })])
-        : await pending;
+      resultReceivedAt = Date.now();
     } finally {
       clearTimeout(promptTimer);
-      clearTimeout(deadlineTimer);
       restore();
-      if (options.autoActivate) await cancelHtmlDownloadWatch(watchId);
+      if (options.autoActivate) cleanupResult = await cancelCurrentWatch();
+    }
+    if (isExtensionRuntimeFailure(cleanupResult)) result = cleanupResult;
+    if (result?.ok && Number.isFinite(options.deadlineAt) && resultReceivedAt >= options.deadlineAt) {
+      result = { ok: false, error: deadlineError, timedOut: true };
     }
     if (isExtensionRuntimeFailure(result)) {
       runtimeGuard?.fail?.(result, "html-download-watch-wait");
@@ -9937,25 +9993,31 @@
       const downloadNameKey = value => artifactNameKey(value).replace(/\s+\(\d+\)(?=\.html?$)/i, "").replace(/\s+/g, "_");
       if (options.autoActivate && downloadNameKey(download.name) !== downloadNameKey(candidate.name)) {
         failures.push({ name: candidate.name, reason: "HTML download did not match the requested filename" });
-        return { downloadedFiles, clickedFallback, failures };
+      } else {
+        downloadedFiles.push({
+          name: options.autoActivate ? candidate.name : safeDownloadName(download.name || candidate.name),
+          sourcePath: download.sourcePath,
+          downloadId: download.id,
+          startTime: download.startTime,
+          endTime: download.endTime
+        });
+        debugLog("captured Chrome downloads fallback", {
+          name: download.name,
+          sourcePath: download.sourcePath,
+          downloadId: download.id
+        });
       }
-      downloadedFiles.push({
-        name: options.autoActivate ? candidate.name : safeDownloadName(download.name || candidate.name),
-        sourcePath: download.sourcePath,
-        downloadId: download.id,
-        startTime: download.startTime,
-        endTime: download.endTime
-      });
-      debugLog("captured Chrome downloads fallback", {
-        name: download.name,
-        sourcePath: download.sourcePath,
-        downloadId: download.id
-      });
     } else {
       failures.push({ name: candidate.name, reason: result?.error || "download watch did not capture HTML file" });
     }
 
-    return { downloadedFiles, clickedFallback, failures };
+    const cleanupFailed = !!options.autoActivate && !cleanupResult?.ok;
+    if (cleanupFailed && !result?.timedOut) {
+      failures.push({ name: candidate.name, reason: cleanupResult?.timedOut
+        ? "HTML download watch cleanup deadline exceeded" : "HTML download watch cleanup was not confirmed" });
+    }
+    return { downloadedFiles, clickedFallback, failures, completedAt: resultReceivedAt, stopBatch: cleanupFailed,
+      timedOut: !!result?.timedOut || result?.error === "html-download-watch-timeout" };
   }
 
   async function captureRemainingHtmlArtifactRows(container, capturedFiles, options = {}) {
@@ -9964,13 +10026,14 @@
     result.expectedNames = Array.from(new Set(initialRows.map(row => row.name)));
     const captured = new Set(capturedFiles.map(file => artifactNameKey(file.name)));
     const startedAt = Date.now();
-    const batchTimeoutMs = Math.min(GENERATED_MARKDOWN_VIEWER_TIMEOUT_MS,
-      Number.isFinite(options.htmlBatchTimeoutMs) ? Math.max(1, options.htmlBatchTimeoutMs) : GENERATED_MARKDOWN_VIEWER_TIMEOUT_MS);
-    const deadlineAt = startedAt + batchTimeoutMs;
+    const batchTimeoutMs = Math.min(HTML_DOWNLOAD_BATCH_TIMEOUT_MS,
+      Number.isFinite(options.htmlBatchTimeoutMs) ? Math.max(1, options.htmlBatchTimeoutMs) : HTML_DOWNLOAD_BATCH_TIMEOUT_MS);
+    const batchDeadlineAt = startedAt + batchTimeoutMs;
+    let progressDeadlineAt = Math.min(batchDeadlineAt, startedAt + HTML_DOWNLOAD_FILE_TIMEOUT_MS);
     for (const name of result.expectedNames.slice(0, 100)) {
       if (captured.has(artifactNameKey(name))) continue;
-      const timeoutMs = batchTimeoutMs - (Date.now() - startedAt);
-      if (timeoutMs <= 0) break;
+      const deadlineAt = Math.min(batchDeadlineAt, progressDeadlineAt, Date.now() + HTML_DOWNLOAD_FILE_TIMEOUT_MS);
+      if (Date.now() >= deadlineAt) break;
       const resolveCandidate = () => {
         const matches = collectArtifactFileRows(container, ["html", "htm"])
           .filter(row => row.name === name && elementVisibilityDetails(row.row).visible &&
@@ -9989,12 +10052,19 @@
         continue;
       }
       const capturedRow = await captureDownloadedHtmlFallback([candidate], [name], {
-        ...options, autoActivate: true, resolveCandidate, deadlineAt
+        ...options, autoActivate: true, resolveCandidate, deadlineAt,
+        deadlineReason: deadlineAt === batchDeadlineAt ? "HTML batch download deadline exceeded" : "HTML file download deadline exceeded"
       });
       result.downloadedFiles.push(...capturedRow.downloadedFiles);
       result.clickedFallback += capturedRow.clickedFallback;
       result.failures.push(...capturedRow.failures);
       if (capturedRow.runtimeUnavailable) return { ...result, runtimeUnavailable: true, runtimeFailure: capturedRow.runtimeFailure };
+      if (capturedRow.timedOut || capturedRow.stopBatch) break;
+      // Only a verified matching file renews progress. A stalled file stops the
+      // sequence; healthy siblings can continue beyond the former 90s total.
+      if (capturedRow.downloadedFiles.length) {
+        progressDeadlineAt = Math.min(batchDeadlineAt, capturedRow.completedAt + HTML_DOWNLOAD_FILE_TIMEOUT_MS);
+      }
     }
     return result;
   }

@@ -2,7 +2,7 @@
 
 This document describes the GitHub-only release process. Do not add Chrome Web Store submission steps.
 
-The current publication target is the **v1.5.62-rc.1 prerelease**, with runtime/archive version 1.5.62. Keep v1.5.54 as the latest stable release. Use [the version-specific checklist](../RELEASE_CHECKLIST_v1.5.62.md) and never reuse an existing tag.
+The current unpublished candidate targets **v1.5.63-rc.1**, with runtime/archive version 1.5.63. The published v1.5.62-rc.1 captured only 24 of 41 HTML files in a later installed save; the new candidate corrects the cumulative deadline. A fresh original-project save passed for all 41 HTML files and the note body with valid local links, after Markdown-download prompt assistance and explicit consent to omit ZIP/.md/.mm files. Non-project Share and fresh isolated package-load gates remain NOT RUN. Keep v1.5.54 as the latest stable release. Use [the version-specific checklist](../RELEASE_CHECKLIST_v1.5.63.md) and never reuse an existing tag.
 
 ## 1. Feature Freeze
 
@@ -51,8 +51,8 @@ Check for:
 Create a release commit and annotated RC tag, substituting the approved version:
 
 ```sh
-git commit -m "Release v1.5.62"
-git tag -a v1.5.62-rc.1 -m "Release candidate 1 for v1.5.62"
+git commit -m "Release v1.5.63"
+git tag -a v1.5.63-rc.1 -m "Release candidate 1 for v1.5.63"
 ```
 
 Do not overwrite existing tags.
@@ -61,9 +61,9 @@ The candidate tree must be committed and clean before archive generation. `scrip
 
 ## 6. Manual Smoke Testing
 
-The current checklist records installed Chrome reload, original multi-file HTML saving, actual Native/Vault inspection, isolated package load and Branch generation separately from source tests. They are NOT RUN until directly verified. The installed project/non-project saving and fresh isolated package-load gates block the stable v1.5.62 tag. Until they pass, publish only the explicitly labeled RC with these limits disclosed; no historical report may substitute for current evidence.
+The current checklist records installed Chrome reload and the original project HTML Save/Native/Vault scenario as PASS only for the assisted, explicitly limited 41-HTML-file run described above. Non-project saving/Share, fresh isolated package load and Branch generation remain NOT RUN. The remaining installed non-project and fresh isolated package-load gates block the stable v1.5.63 tag. Until they pass, publish only the explicitly labeled RC with these limits disclosed; no historical report may substitute for current evidence.
 
-Preserve the historical v1.5.40 evidence in [manual-smoke-test.md](manual-smoke-test.md) and `RELEASE_CHECKLIST.md`. For the current linked-HTML and Branch checks, record results in `RELEASE_CHECKLIST_v1.5.62.md`. The older [v1.5.50 smoke test](manual-smoke-test-v1.5.50.md) remains historical.
+Preserve the historical v1.5.40 evidence in [manual-smoke-test.md](manual-smoke-test.md) and `RELEASE_CHECKLIST.md`. For the current linked-HTML and Branch checks, record results in `RELEASE_CHECKLIST_v1.5.63.md`. The older [v1.5.50 smoke test](manual-smoke-test-v1.5.50.md) remains historical.
 
 ## 7. Archive Generation
 
@@ -87,10 +87,10 @@ Confirm:
 
 ## 9. Final Tag
 
-The stable v1.5.62 tag is currently BLOCKED. Create it only after required validation and every blocking live/manual gate in the current checklist passes. The command below is a future stable-release step, not part of the RC publication:
+The stable v1.5.63 tag is currently BLOCKED. Create it only after required validation and every blocking live/manual gate in the current checklist passes. The command below is a future stable-release step, not part of the RC publication:
 
 ```sh
-git tag -a v1.5.62 -m "Release v1.5.62"
+git tag -a v1.5.63 -m "Release v1.5.63"
 ```
 
 A packaged macOS Native installer/uninstaller run is not a blocking gate unless the current version-specific checklist marks it as required. When it is not run, retain `NOT TESTED`; do not alter an existing user installation solely to convert that row to `PASS`.
@@ -105,7 +105,7 @@ Publication requires explicit approval before any external action:
 - Creating a GitHub Release.
 - Uploading release assets.
 
-After approval, push only `codex/release-v1.5.62` and its new annotated `v1.5.62-rc.1` tag. Keep `main` and the latest stable v1.5.54 release unchanged. Create a GitHub prerelease and upload:
+After approval, push only `codex/release-v1.5.63` and its new annotated `v1.5.63-rc.1` tag. Keep `main` and the latest stable v1.5.54 release unchanged. Create a GitHub prerelease and upload:
 
 - Unpacked extension ZIP.
 - macOS native-host ZIP.

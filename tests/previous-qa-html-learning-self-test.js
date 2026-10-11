@@ -179,7 +179,7 @@ function buildScenarioNote(hooks, nodes, currentNode, hasRealHtmlAttachment, use
 
 const hooks = loadContentHooks();
 const backgroundHooks = loadBackgroundHooks();
-assert.strictEqual(hooks.VERSION, "1.5.62");
+assert.strictEqual(hooks.VERSION, "1.5.63");
 
 const responseShareUrl = ["https://chatgpt.com", "s", "synthetic-response-note"].join("/");
 const responseSupplement = hooks.supplementalShareMetadata({ shareUrl: responseShareUrl, shareScope: "response" });

@@ -2,16 +2,16 @@
 
 This project is distributed through GitHub Releases and installed with Chrome's Load unpacked function.
 
-Select the **v1.5.62-rc.1 prerelease** explicitly; the latest stable release remains v1.5.54. Its extension and ZIP filenames use version 1.5.62. Actual Chrome Save/Native/Vault and fresh isolated package-load verification are NOT RUN. Review the [release checklist](../RELEASE_CHECKLIST_v1.5.62.md) and published asset checksums before installing.
+The **v1.5.63-rc.1 candidate is not published yet**. The steps below apply once its reviewed assets are available; extension and ZIP filenames use version 1.5.63. Select that prerelease explicitly and compare its published checksums. The latest stable release remains v1.5.54. The published v1.5.62-rc.1 has a known multi-file timeout: one save captured only 24 of 41 expected HTML files. Automated tests and the original project Save/Native/Vault scenario pass for the correction: 41 HTML files and the note body were inspected, with valid local links. That run required assistance at the Markdown-download prompt and explicit consent to omit ZIP, detailed Markdown (.md) and mind-map (.mm) files. Non-project Share checks and fresh isolated package-load verification remain NOT RUN. See the [release checklist](../RELEASE_CHECKLIST_v1.5.63.md).
 
 ## Install the Extension
 
-1. Download `gpt-to-obsidian-saver-v1.5.62-unpacked-extension.zip` from the GitHub Release.
+1. Download `gpt-to-obsidian-saver-v1.5.63-unpacked-extension.zip` from the GitHub Release.
 2. Download `SHA256SUMS.txt`.
 3. Verify the checksum:
 
 ```sh
-shasum -a 256 gpt-to-obsidian-saver-v1.5.62-unpacked-extension.zip
+shasum -a 256 gpt-to-obsidian-saver-v1.5.63-unpacked-extension.zip
 ```
 
 Compare the result with `SHA256SUMS.txt`.
@@ -21,7 +21,7 @@ Compare the result with `SHA256SUMS.txt`.
 6. Enable Developer mode.
 7. Select Load unpacked.
 8. Select the unzipped folder containing `manifest.json`.
-9. Confirm the displayed version is `1.5.62`.
+9. Confirm the displayed version is `1.5.63`.
 
 Chrome may warn about developer-mode extensions because this is an unpacked GitHub installation.
 
@@ -83,7 +83,7 @@ For non-project conversations, ordinary Markdown and HTML saves require separate
 3. Confirm the Markdown note is created.
 4. Confirm the `.html` file exists in the configured attachment folder.
 5. Confirm the note link opens the HTML file.
-6. For a multi-file answer, check every expected file, including collapsed cards. Open its index and verify chapter links and distinct file contents. A readable index alone is not a complete multi-file save.
+6. For a multi-file answer, keep the answer available until collection finishes. Each verified file permits up to 90 seconds for continued progress, with a ten-minute total cap. Check every expected file, including collapsed cards. Open its index and verify chapter links and distinct file contents. A readable index alone is not a complete multi-file save.
 
 ## Branch & visualize
 
